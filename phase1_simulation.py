@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 
 # --- Constants ---
 G = 9.80665  # m/s^2, gravitational acceleration
+
 DRY_MASS = 1.5  # kg, mass of rocket without propellant
 PROPELLANT_MASS = 0.8  # kg, mass of propellant
 ENGINE_BURN_TIME = 4.0  # seconds
@@ -11,7 +12,6 @@ THRUST_FORCE = 60.0  # Newtons, constant thrust
 
 # Rotational inertia tensor [I_xx, I_yy, I_zz] (kg*m^2)
 INERTIA_TENSOR = np.diag([0.01, 0.01, 0.001])
-INERTIA_TENSOR_INV = np.linalg.inv(INERTIA_TENSOR)
 
 # --- Helper Functions ---
 
@@ -29,6 +29,18 @@ def rotate_by_quaternion(vector, q):
     rotation_matrix = quaternion_to_rotation_matrix(q)
     return rotation_matrix @ vector
 
+def hit_ground(t, state):
+    """
+    Event function for solve_ivp to detect when the rocket hits the ground.
+    Stops the simulation when altitude (z-position) is zero.
+    """
+    # We only care about this after the first fraction of a second
+    if t > 0.1:
+        return state[2]  # Return altitude
+    return 1 # Return a positive value to not trigger at t=0
+
+hit_ground.terminal = True  # Stop the integration when this event occurs
+hit_ground.direction = -1   # Trigger when the value goes from positive to negative
 # --- Equations of Motion ---
 
 def rocket_dynamics(t, state):
@@ -103,28 +115,63 @@ if __name__ == "__main__":
     t_span = [0, 30]
     t_eval = np.linspace(t_span[0], t_span[1], 1001)
 
-    # Run the simulation
+    # Run the simulation with the event to stop on ground impact
     result = solve_ivp(
         rocket_dynamics,
         t_span,
         initial_state,
         t_eval=t_eval,
         dense_output=True,
-        method='RK45'
+        method='RK45',
+        events=hit_ground
     )
 
     # --- Output and Verification ---
     # Extract results
     time = result.t
+    position = result.y[0:3]
     altitude = result.y[2]  # z-position
+    velocity_z = result.y[5] # z-velocity
 
-    # Plot the results
+    # --- Plotting ---
+    # 1. Altitude vs. Time
     plt.figure(figsize=(10, 6))
     plt.plot(time, altitude)
     plt.title("Altitude vs. Time")
     plt.xlabel("Time (s)")
     plt.ylabel("Altitude (m)")
     plt.grid(True)
-    plt.savefig("phase1_trajectory.png")
-    print("Simulation complete. Trajectory plot saved as 'phase1_trajectory.png'")
-    # plt.show() # Uncomment to display the plot directly
+
+    # 2. Velocity vs. Time
+    plt.figure(figsize=(10, 6))
+    plt.plot(time, velocity_z)
+    plt.title("Vertical Velocity vs. Time")
+    plt.xlabel("Time (s)")
+    plt.ylabel("Vertical Velocity (m/s)")
+    plt.grid(True)
+
+    # 3. 3D Trajectory with Orientation
+    print("Simulation complete. Generating interactive plots...")
+    fig = plt.figure(figsize=(10, 8))
+    ax = fig.add_subplot(111, projection='3d')
+    ax.plot(position[0], position[1], position[2], label='Trajectory')
+
+    # Plot orientation vectors at intervals
+    body_z_axis = np.array([0, 0, 1])
+    num_arrows = 20
+    indices = np.linspace(0, len(time) - 1, num_arrows, dtype=int)
+    for i in indices:
+        pos = result.y[0:3, i]
+        quat = result.y[6:10, i]
+        orientation_vec = rotate_by_quaternion(body_z_axis, quat)
+        ax.quiver(pos[0], pos[1], pos[2], orientation_vec[0], orientation_vec[1], orientation_vec[2], length=10, color='r')
+
+    ax.set_xlabel("X (m)")
+    ax.set_ylabel("Y (m)")
+    ax.set_zlabel("Z (m)") # type: ignore
+    ax.set_title("3D Trajectory with Rocket Orientation")
+    ax.legend()
+    ax.axis('equal')
+
+    # Display all plots in interactive windows
+    plt.show()
