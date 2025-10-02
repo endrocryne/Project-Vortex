@@ -23,6 +23,8 @@ DRAG_COEFFICIENT = 0.9
 CP_VECTOR = np.array([0, 0, 0.5])
 GIMBAL_VECTOR = np.array([0, 0, -1.0]) # Location of gimbal pivot relative to CoM
 KP, KI, KD = 0.1454, 2.389, 0.06 # Tuned PID gains
+YAW_INIT = 0.1 # Initial yaw disturbance
+PITCH_INIT = 0.1 # Initial pitch disturbance
 
 # --- Helper Functions ---
 def q_conjugate(q):
@@ -107,8 +109,11 @@ if __name__ == "__main__":
     initial_state = np.zeros(13)
     initial_state[6] = 1.0 # qw = 1
     # As per prompt, disturbance is on state[11]
-    initial_state[11] = 0.1
+    initial_state[11] = YAW_INIT
 
+     # Disturbance on ang_vel_x (state[10]) to induce pitch and Y-axis motion
+    initial_state[10] = PITCH_INIT
+    
     t_start, t_end, dt = 0.0, 40.0, 0.02
     
     pid_pitch = PIDController(KP, KI, KD)
