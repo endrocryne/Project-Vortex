@@ -3,23 +3,45 @@ from scipy.integrate import RK45
 import matplotlib.pyplot as plt
 import time
 import sys
+import tkinter as tk
+import csv
+from tkinter import ttk
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.figure import Figure
 
 # --- Monte Carlo Parameters ---
-N_RUNS = 500
+N_RUNS = 4
 
-# Base values from Phase 2 are now the means
-THRUST_FORCE_MEAN = 60.0
-THRUST_FORCE_STD = 0.05 # 5% Variation
+# The base thrust curve is the mean. STD is the per-point variation.
+THRUST_CURVE_STD = 0.05 # 5% Variation
 
-PROPELLANT_MASS_MEAN = 0.8
-PROPELLANT_MASS_STD = 0.1 # 10% Variation
+PROPELLANT_MASS_MEAN = 0.0125 # 12.5g for a C-class motor, matching thrust curve
+PROPELLANT_MASS_STD_PERCENT = 0.05 # 5% Variation
 
 DRAG_COEFFICIENT_MEAN = 0.6
-DRAG_COEFFICIENT_STD = 0.1 # 10% variation
+DRAG_COEFFICIENT_STD_PERCENT = 0.10 # 10% Variation
+
+DRY_MASS_MEAN = 0.060  # 60 grams
+DRY_MASS_STD_PERCENT = 0.025 # 2.5% Variation
+
+AIR_DENSITY_MEAN = 1.225
+AIR_DENSITY_STD_PERCENT = 0.02 # 2% Variation for atmospheric changes
+
+# --- Advanced Aerodynamics Variations ---
+C_N_ALPHA_MEAN = 2.5 # Normal Force Coefficient derivative (per radian)
+C_N_ALPHA_STD_PERCENT = 0.10 # 10% Variation
+
+CP_Z_OFFSET_MEAN = -0.2 # Center of Pressure Z-offset from CoM. MUST be negative for stability.
+CP_Z_OFFSET_STD_PERCENT = 0.05 # 5% Variation
+
+# --- Control System & Initial State Variations ---
+YAW_INIT_MEAN = 0.1 # Initial yaw disturbance
+YAW_INIT_STD_PERCENT = 0.20 # 20% Variation
+PITCH_INIT_MEAN = 0.1 # Initial pitch disturbance
+PITCH_INIT_STD_PERCENT = 0.20 # 20% Variation
 
 # --- Constants ---
 G = 9.80665
-DRY_MASS = 0.060  # 60 grams - typical for a mid-size model rocket
 
 # Base thrust curve, to be scaled by random parameter
 TIME_POINTS = np.array([
@@ -36,16 +58,11 @@ THRUST_POINTS_BASE = np.array([
 ENGINE_BURN_TIME = TIME_POINTS[-1]
 INERTIA_TENSOR = np.diag([0.01, 0.01, 0.001])
 INERTIA_TENSOR_INV = np.linalg.inv(INERTIA_TENSOR)
-AIR_DENSITY = 1.225
 ROCKET_DIAMETER = 0.034 # 34mm diameter
 ROCKET_AREA = np.pi * (ROCKET_DIAMETER / 2)**2
 # --- Advanced Aerodynamics ---
-C_N_alpha = 2.5 # Normal Force Coefficient derivative (per radian)
-CP_VECTOR = np.array([0, 0, -0.2]) # Center of Pressure MUST be behind CoM for stability
 GIMBAL_VECTOR = np.array([0, 0, -1.0]) # Location of gimbal pivot relative to CoM
-KP, KI, KD = 0.05, 0.1, 0.01 # Re-tuned PID gains for a lighter rocket
-YAW_INIT = 0.1 # Initial yaw disturbance
-PITCH_INIT = 0.1 # Initial pitch disturbance
+KP, KI, KD = 0.05, 0.1, 0.01 # PID gains are now constant
 MAX_GIMBAL_ANGLE = np.deg2rad(10) # Limit gimbal to 10 degrees
 
 # --- Helper Functions ---
@@ -80,7 +97,10 @@ class PIDController:
         return self.last_output
 
 # --- Equations of Motion ---
-def rocket_dynamics(t, state, pid_pitch, pid_yaw, dt, C_A, propellant_mass, total_impulse, thrust_points):
+def rocket_dynamics(t, state, params, pid_pitch, pid_yaw, dt):
+    # Unpack parameters needed for this step
+    C_A, propellant_mass, total_impulse, thrust_points = params['drag_coefficient'], params['propellant_mass'], params['total_impulse'], params['thrust_curve']
+    air_density, C_N_alpha, cp_vector = params['air_density'], params['C_N_alpha'], params['cp_vector']
     pos, vel, quat, ang_vel, mass = state[0:3], state[3:6], state[6:10], state[10:13], state[13]
     quat /= np.linalg.norm(quat)
 
@@ -112,7 +132,7 @@ def rocket_dynamics(t, state, pid_pitch, pid_yaw, dt, C_A, propellant_mass, tota
         C_N = C_N_alpha * np.sin(aoa) # Normal force coefficient
 
         # 3. Calculate forces in the aerodynamic frame and rotate to body frame
-        q_dyn = 0.5 * AIR_DENSITY * v_mag**2 * ROCKET_AREA # Dynamic Pressure q = 1/2 * rho * v^2 * A
+        q_dyn = 0.5 * air_density * v_mag**2 * ROCKET_AREA # Dynamic Pressure q = 1/2 * rho * v^2 * A
 
         # Calculate forces in the body frame.
         # Axial force acts along the -Z axis of the rocket.
@@ -128,7 +148,7 @@ def rocket_dynamics(t, state, pid_pitch, pid_yaw, dt, C_A, propellant_mass, tota
         F_aero_body = F_axial_body + F_normal_body
 
         # 4. Calculate aerodynamic torque
-        τ_aero = np.cross(CP_VECTOR, F_aero_body)
+        τ_aero = np.cross(cp_vector, F_aero_body)
         F_aero_world = rotate_by_quaternion(F_aero_body, quat)
 
     F_thrust_body, τ_tvc = np.zeros(3), np.zeros(3)
@@ -167,36 +187,37 @@ def rocket_dynamics(t, state, pid_pitch, pid_yaw, dt, C_A, propellant_mass, tota
 
     return np.concatenate((pos_dot, vel_dot, quat_dot, omega_dot, [dm_dt]))
 
-def run_simulation(params: dict) -> dict:
+def run_simulation(params: dict, full_logs=False) -> dict:
     """
     Runs a single rocket flight simulation with varied parameters.
     """
-    # Extract parameters
-    thrust_force_multiplier = params['thrust_force']
-    propellant_mass = params['propellant_mass']
-    C_A = params['drag_coefficient']
-
-    # Scale the thrust curve
-    thrust_points = THRUST_POINTS_BASE * thrust_force_multiplier
-    total_impulse = np.trapz(thrust_points, TIME_POINTS)
+    # Calculate derived parameters and add them to the dictionary
+    params['total_impulse'] = np.trapezoid(params['thrust_curve'], TIME_POINTS)
+    params['cp_vector'] = np.array([0, 0, params['cp_z_offset']])
 
     # Initial state
     initial_state = np.zeros(14)
     initial_state[6] = 1.0  # qw = 1
-    initial_state[13] = DRY_MASS + propellant_mass
-    initial_state[11] = YAW_INIT
-    initial_state[10] = PITCH_INIT
+    initial_state[13] = params['dry_mass'] + params['propellant_mass']
+    initial_state[11] = params['yaw_init'] # Angular velocity around y-axis
+    initial_state[10] = params['pitch_init'] # Angular velocity around x-axis
 
     t_start, t_end, dt = 0.0, 30.0, 0.02
     pid_pitch = PIDController(KP, KI, KD)
     pid_yaw = PIDController(KP, KI, KD)
 
-    logs = {'time': [], 'state': []}
+    # --- Metrics tracking for this run ---
+    apogee = 0.0
+    state_at_apogee = None
+    stable = True
+    time_unstable = 0.0
+
+    logs = {'time': [], 'state': [], 'gimbal': [], 'error': []}
     current_t, current_state = t_start, initial_state
 
     # Launch Clamp Logic
-    initial_weight = (DRY_MASS + propellant_mass) * G
-    liftoff_thrust_indices = np.where(thrust_points > initial_weight)[0]
+    initial_weight = (params['dry_mass'] + params['propellant_mass']) * G
+    liftoff_thrust_indices = np.where(params['thrust_curve'] > initial_weight)[0]
     liftoff_time = TIME_POINTS[liftoff_thrust_indices[0]] if len(liftoff_thrust_indices) > 0 else t_end
     has_lifted_off = False
 
@@ -204,55 +225,90 @@ def run_simulation(params: dict) -> dict:
         if has_lifted_off and current_state[2] <= 0:
             break
 
-        logs['time'].append(current_t)
-        logs['state'].append(current_state.copy())
+        if full_logs:
+            logs['time'].append(current_t)
+            logs['state'].append(current_state.copy())
+            z_axis = rotate_by_quaternion(np.array([0,0,1]), current_state[6:10])
+            logs['error'].append([z_axis[1], -z_axis[0]])
+            logs['gimbal'].append([np.rad2deg(pid_pitch.last_output), np.rad2deg(pid_yaw.last_output)])
+
+        # Always track apogee and stability, regardless of full_logs
+        time_step = 0.0
+        tilt_angle = 0.0 # Initialize here to prevent UnboundLocalError
+        if has_lifted_off:
+            apogee = max(apogee, current_state[2])
+            if current_state[2] >= apogee and apogee > 0:
+                state_at_apogee = current_state.copy()
+            z_axis_body = rotate_by_quaternion(np.array([0, 0, 1]), current_state[6:10]) # This is the world vector
+            tilt_angle = np.arccos(np.clip(np.dot(z_axis_body, np.array([0, 0, 1])), -1.0, 1.0))
+
+            if np.rad2deg(tilt_angle) > 20:
+                # This will be updated after the physics step to get the correct duration
+                pass
+            else:
+                time_unstable = 0.0 # Reset the timer if the rocket is stable
 
         if current_t >= liftoff_time:
+            prev_t = current_t
             solver = RK45(
-                lambda t, y: rocket_dynamics(t, y, pid_pitch, pid_yaw, dt, C_A, propellant_mass, total_impulse, thrust_points),
+                lambda t, y: rocket_dynamics(t, y, params, pid_pitch, pid_yaw, dt),
                 current_t, current_state, t_end, max_step=dt
             )
             solver.step()
             has_lifted_off = True
             current_t, current_state = solver.t, solver.y
+            time_step = current_t - prev_t
         else:
-            current_thrust = np.interp(current_t, TIME_POINTS, thrust_points)
-            if current_thrust > 0 and total_impulse > 0:
-                mass_flow_rate = (propellant_mass / total_impulse) * current_thrust
+            prev_t = current_t
+            current_thrust = np.interp(current_t, TIME_POINTS, params['thrust_curve'])
+            if current_thrust > 0 and params['total_impulse'] > 0:
+                mass_flow_rate = (params['propellant_mass'] / params['total_impulse']) * current_thrust
                 current_state[13] -= mass_flow_rate * dt
             current_t += dt
+            time_step = current_t - prev_t
 
-    for key in logs:
-        logs[key] = np.array(logs[key])
-
-    # Post-simulation analysis
-    if len(logs['time']) > 1:
-        apogee = np.max(logs['state'][:, 2])
-        flight_time = logs['time'][-1]
-        landing_pos = logs['state'][-1, 0:2]
-        landing_distance = np.linalg.norm(landing_pos)
-
-        # Stability check
-        stable = True
-        max_tilt_angle = 0
-        for q_state in logs['state'][:, 6:10]:
-            z_axis_body = rotate_by_quaternion(np.array([0, 0, 1]), q_state)
-            # Tilt is the angle between rocket's Z and world's Z
-            tilt_angle = np.arccos(np.dot(z_axis_body, np.array([0, 0, 1])))
-            if np.rad2deg(tilt_angle) > 20:
+        # Update stability timer after the time step is known
+        if has_lifted_off and np.rad2deg(tilt_angle) > 20:
+            time_unstable += time_step
+            if time_unstable > 1.2:
                 stable = False
-                break
-            max_tilt_angle = max(max_tilt_angle, tilt_angle)
-    else:
-        # Handle cases where simulation ends prematurely
-        apogee, flight_time, landing_distance, stable = 0, 0, 0, False
+                # The 'break' was removed as requested to allow failed simulations to complete.
 
-    return {
+    if full_logs:
+        for key in logs:
+            logs[key] = np.array(logs[key])
+        return logs
+
+    flight_time = current_t
+    landing_pos = current_state[0:2]
+
+    # --- Prepare detailed results ---
+    results = {
         'apogee': apogee,
-        'landing_distance': landing_distance,
         'flight_time': flight_time,
-        'stable': stable
+        'stable': stable,
+        'landing_x': landing_pos[0],
+        'landing_y': landing_pos[1],
+        'landing_distance': np.linalg.norm(landing_pos),
+        'landing_vel_x': current_state[3],
+        'landing_vel_y': current_state[4],
+        'landing_vel_z': current_state[5],
     }
+
+    if state_at_apogee is not None:
+        apogee_vel = state_at_apogee[3:6]
+        apogee_tilt_quat = state_at_apogee[6:10]
+        z_axis_at_apogee = rotate_by_quaternion(np.array([0, 0, 1]), apogee_tilt_quat)
+        apogee_tilt_angle = np.arccos(np.clip(np.dot(z_axis_at_apogee, np.array([0, 0, 1])), -1.0, 1.0))
+
+        results.update({
+            'apogee_vel_x': apogee_vel[0],
+            'apogee_vel_y': apogee_vel[1],
+            'apogee_vel_z': apogee_vel[2],
+            'apogee_tilt_deg': np.rad2deg(apogee_tilt_angle)
+        })
+
+    return results
 
 
 # --- Main Monte Carlo Loop ---
@@ -260,23 +316,27 @@ if __name__ == "__main__":
     all_results = []
     print(f"Starting Monte Carlo simulation with {N_RUNS} runs...")
 
-    # Calculate the thrust multiplier needed to achieve the mean thrust
-    peak_thrust_base = np.max(THRUST_POINTS_BASE)
-    if peak_thrust_base > 0:
-        thrust_multiplier_mean = THRUST_FORCE_MEAN / peak_thrust_base
-    else:
-        thrust_multiplier_mean = 1.0
-    
-    thrust_multiplier_std_dev = thrust_multiplier_mean * THRUST_FORCE_STD
-
     for i in range(N_RUNS):
-        # Generate Random Parameters
-        thrust_multiplier = np.random.normal(thrust_multiplier_mean, thrust_multiplier_std_dev)
+        # --- Generate Randomized Thrust Curve ---
+        # Create random multipliers for each point, normally distributed around 1.0
+        random_factors = np.random.normal(loc=1.0, scale=THRUST_CURVE_STD, size=len(THRUST_POINTS_BASE))
+        # Apply the random factors to the base curve
+        randomized_thrust_curve = THRUST_POINTS_BASE * random_factors
+        # Ensure the start and end of the thrust curve remain zero
+        randomized_thrust_curve[0] = 0.0
+        randomized_thrust_curve[-1] = 0.0
         
+        # --- Generate Other Random Parameters ---
         params = {
-            'thrust_force': thrust_multiplier,
-            'propellant_mass': np.random.normal(PROPELLANT_MASS_MEAN, PROPELLANT_MASS_STD * PROPELLANT_MASS_MEAN),
-            'drag_coefficient': np.random.normal(DRAG_COEFFICIENT_MEAN, DRAG_COEFFICIENT_STD * DRAG_COEFFICIENT_MEAN),
+            'thrust_curve': randomized_thrust_curve,
+            'propellant_mass': np.random.normal(PROPELLANT_MASS_MEAN, PROPELLANT_MASS_MEAN * PROPELLANT_MASS_STD_PERCENT),
+            'drag_coefficient': np.random.normal(DRAG_COEFFICIENT_MEAN, DRAG_COEFFICIENT_MEAN * DRAG_COEFFICIENT_STD_PERCENT),
+            'dry_mass': np.random.normal(DRY_MASS_MEAN, DRY_MASS_MEAN * DRY_MASS_STD_PERCENT),
+            'air_density': np.random.normal(AIR_DENSITY_MEAN, AIR_DENSITY_MEAN * AIR_DENSITY_STD_PERCENT),
+            'C_N_alpha': np.random.normal(C_N_ALPHA_MEAN, C_N_ALPHA_MEAN * C_N_ALPHA_STD_PERCENT),
+            'cp_z_offset': np.random.normal(CP_Z_OFFSET_MEAN, abs(CP_Z_OFFSET_MEAN) * CP_Z_OFFSET_STD_PERCENT), # Use abs for STD calculation
+            'yaw_init': np.random.normal(YAW_INIT_MEAN, abs(YAW_INIT_MEAN) * YAW_INIT_STD_PERCENT),
+            'pitch_init': np.random.normal(PITCH_INIT_MEAN, abs(PITCH_INIT_MEAN) * PITCH_INIT_STD_PERCENT),
         }
 
         result = run_simulation(params)
@@ -289,46 +349,70 @@ if __name__ == "__main__":
 
     # --- Post-Processing and Output ---
     successful_runs = [r for r in all_results if r['stable']]
-    success_rate = (len(successful_runs) / N_RUNS) * 100
+    success_rate = (len(successful_runs) / N_RUNS) * 100 if N_RUNS > 0 else 0
 
-    if successful_runs:
-        apogees = [r['apogee'] for r in successful_runs]
-        landing_distances = [r['landing_distance'] for r in successful_runs]
-
+    if all_results:
         print("\n--- Monte Carlo Simulation Results ---")
         print(f"Success Rate: {success_rate:.2f}% ({len(successful_runs)}/{N_RUNS} stable flights)")
-        print("\n--- Apogee (m) ---")
-        print(f"  Mean: {np.mean(apogees):.2f}")
-        print(f"  Std Dev: {np.std(apogees):.2f}")
-        print(f"  Min: {np.min(apogees):.2f}")
-        print(f"  Max: {np.max(apogees):.2f}")
 
+        # Collect data from ALL runs, not just successful ones
+        apogees = [r.get('apogee', 0) for r in all_results]
+        landing_distances = [r.get('landing_distance', 0) for r in all_results]
+
+        print("\n--- Apogee (m) ---")
+        if apogees:
+            print(f"  Mean: {np.mean(apogees):.2f}")
+            print(f"  Std Dev: {np.std(apogees):.2f}")
+            print(f"  Min: {np.min(apogees):.2f}")
+            print(f"  Max: {np.max(apogees):.2f}")
+        
         print("\n--- Landing Distance (m) ---")
-        print(f"  Mean: {np.mean(landing_distances):.2f}")
-        print(f"  Std Dev: {np.std(landing_distances):.2f}")
-        print(f"  Min: {np.min(landing_distances):.2f}")
-        print(f"  Max: {np.max(landing_distances):.2f}")
+        if landing_distances:
+            print(f"  Mean: {np.mean(landing_distances):.2f}")
+            print(f"  Std Dev: {np.std(landing_distances):.2f}")
+            print(f"  Min: {np.min(landing_distances):.2f}")
+            print(f"  Max: {np.max(landing_distances):.2f}")
         print("------------------------------------")
 
+        # --- Export raw data to CSV ---
+        print("\nExporting raw simulation data to CSV...")
+        csv_filename = "phase3_monte_carlo_results.csv"
+        try:
+            with open(csv_filename, 'w', newline='') as csvfile:
+                if all_results:
+                    # Define a fixed order for columns for consistency
+                    fieldnames = ['run_number', 'stable', 'apogee', 'flight_time', 'landing_distance', 'landing_x', 'landing_y',
+                                  'landing_vel_x', 'landing_vel_y', 'landing_vel_z', 'apogee_vel_x', 'apogee_vel_y',
+                                  'apogee_vel_z', 'apogee_tilt_deg']
+                    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                    
+                    writer.writeheader()
+                    for i, result in enumerate(all_results):
+                        row = {'run_number': i + 1, **result}
+                        writer.writerow(row)
+            print(f"Saved raw data to {csv_filename}")
+        except IOError as e:
+            print(f"Error writing to CSV file: {e}")
+        
         # --- Generate Aggregate Plots ---
         print("\nGenerating and saving aggregate plots...")
         
         # Plot Apogee Distribution
         fig_apogee, ax_apogee = plt.subplots(figsize=(10, 6))
         ax_apogee.hist(apogees, bins=30, color='skyblue', edgecolor='black')
-        ax_apogee.set_title('Apogee Distribution for Successful Flights')
+        ax_apogee.set_title('Apogee Distribution (All Flights)')
         ax_apogee.set_xlabel('Apogee (m)')
         ax_apogee.set_ylabel('Frequency')
         ax_apogee.grid(True)
         fig_apogee.tight_layout()
         apogee_filename = "phase3_apogee_distribution.png"
         fig_apogee.savefig(apogee_filename)
-        print(f"Saved apogee distribution plot to {apogee_filename}")
-
+        print(f"Saved apogee distribution plot to {apogee_filename}")        
+        
         # Plot Landing Distance Distribution
         fig_dist, ax_dist = plt.subplots(figsize=(10, 6))
         ax_dist.hist(landing_distances, bins=30, color='lightgreen', edgecolor='black')
-        ax_dist.set_title('Landing Distance Distribution for Successful Flights')
+        ax_dist.set_title('Landing Distance Distribution (All Flights)')
         ax_dist.set_xlabel('Landing Distance (m)')
         ax_dist.set_ylabel('Frequency')
         ax_dist.grid(True)
@@ -337,7 +421,108 @@ if __name__ == "__main__":
         fig_dist.savefig(distance_filename)
         print(f"Saved landing distance distribution plot to {distance_filename}")
 
+        # Plot Stability Distribution (Pie Chart)
+        fig_stability, ax_stability = plt.subplots(figsize=(8, 8))
+        unsuccessful_runs_count = N_RUNS - len(successful_runs)
+        labels = 'Stable', 'Unstable'
+        sizes = [len(successful_runs), unsuccessful_runs_count]
+        colors = ['limegreen', 'orangered']
+        explode = (0.1, 0) if sizes[0] > 0 and sizes[1] > 0 else (0, 0)
+
+        ax_stability.pie(sizes, explode=explode, labels=labels, colors=colors,
+                autopct='%1.1f%%', shadow=True, startangle=90)
+        ax_stability.axis('equal')  # Equal aspect ratio ensures that pie is drawn as a circle.
+        ax_stability.set_title('Flight Stability Distribution')
+        stability_filename = "phase3_stability_distribution.png"
+        fig_stability.savefig(stability_filename)
+        print(f"Saved stability distribution plot to {stability_filename}")
+
+        # --- Single Run with Mean Parameters for Plotting ---
+        print("\nGenerating plots for a single run with mean parameters...")
+        mean_params = {
+            'thrust_curve': THRUST_POINTS_BASE,
+            'propellant_mass': PROPELLANT_MASS_MEAN,
+            'drag_coefficient': DRAG_COEFFICIENT_MEAN,
+            'dry_mass': DRY_MASS_MEAN,
+            'air_density': AIR_DENSITY_MEAN,
+            'C_N_alpha': C_N_ALPHA_MEAN,
+            'cp_z_offset': CP_Z_OFFSET_MEAN,
+            'yaw_init': YAW_INIT_MEAN, 'pitch_init': PITCH_INIT_MEAN,
+        }
+        logs = run_simulation(mean_params, full_logs=True)
+
+        # --- Create Tabbed Plot Window ---
+        root = tk.Tk()
+        root.title("Vortex Rocket Simulation v0.3 Beta")
+        notebook = ttk.Notebook(root)
+        notebook.pack(pady=10, padx=10, expand=True, fill="both")
+
+        def create_plot_tab(tab_name, plot_function):
+            frame = ttk.Frame(notebook, width=800, height=600)
+            notebook.add(frame, text=tab_name)
+            
+            fig = Figure(figsize=(10, 7), dpi=100)
+            fig.set_tight_layout(True)
+            
+            plot_function(fig)
+            
+            canvas = FigureCanvasTkAgg(fig, master=frame)
+            canvas.draw()
+            canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+
+        # --- Define Plotting Functions for each Tab ---
+        def plot_position(fig):
+            ax = fig.add_subplot(111)
+            ax.plot(logs['time'], logs['state'][:,0], label='X Position')
+            ax.plot(logs['time'], logs['state'][:,1], label='Y Position')
+            ax.plot(logs['time'], logs['state'][:,2], label='Z Position (Altitude)')
+            ax.set_title("Position vs. Time")
+            ax.set_xlabel("Time (s)"); ax.set_ylabel("Position (m)")
+            ax.legend(); ax.grid(True)
+
+        def plot_velocity(fig):
+            ax = fig.add_subplot(111)
+            ax.plot(logs['time'], logs['state'][:,3], label='Vx'); ax.plot(logs['time'], logs['state'][:,4], label='Vy'); ax.plot(logs['time'], logs['state'][:,5], label='Vz')
+            ax.set_title("Velocity Components vs. Time"); ax.set_xlabel("Time (s)"); ax.set_ylabel("Velocity (m/s)")
+            ax.legend(); ax.grid(True)
+
+        def plot_acceleration(fig):
+            ax = fig.add_subplot(111)
+            accel = np.gradient(logs['state'][:, 3:6], logs['time'], axis=0)
+            ax.plot(logs['time'], accel[:,0], label='Ax'); ax.plot(logs['time'], accel[:,1], label='Ay'); ax.plot(logs['time'], accel[:,2], label='Az')
+            ax.set_title("Acceleration Components vs. Time"); ax.set_xlabel("Time (s)"); ax.set_ylabel("Acceleration (m/s^2)")
+            ax.legend(); ax.grid(True)
+
+        def plot_tilt_error(fig):
+            ax = fig.add_subplot(111)
+            ax.plot(logs['time'], np.rad2deg(logs['error'][:,0]), label='Pitch Error'); ax.plot(logs['time'], np.rad2deg(logs['error'][:,1]), label='Yaw Error')
+            ax.set_title("Tilt Error vs. Time"); ax.set_xlabel("Time (s)"); ax.set_ylabel("Error (degrees)")
+            ax.legend(); ax.grid(True)
+
+        def plot_gimbal_cmd(fig):
+            ax = fig.add_subplot(111)
+            ax.plot(logs['time'], logs['gimbal'][:,0], label='Pitch Command'); ax.plot(logs['time'], logs['gimbal'][:,1], label='Yaw Command')
+            ax.set_title("Gimbal Command vs. Time"); ax.set_xlabel("Time (s)"); ax.set_ylabel("Angle (degrees)")
+            ax.legend(); ax.grid(True)
+
+        def plot_3d_trajectory(fig):
+            ax = fig.add_subplot(111, projection='3d')
+            position = logs['state'][:, 0:3].T
+            ax.plot(position[0], position[1], position[2], label='Trajectory')
+            ax.set_xlabel("X (m)"); ax.set_ylabel("Y (m)"); ax.set_zlabel("Z (m)")
+            ax.set_title("3D Trajectory"); ax.legend(); ax.axis('equal')
+
+        # --- Create all tabs ---
+        create_plot_tab("Position", plot_position)
+        create_plot_tab("Velocity", plot_velocity)
+        create_plot_tab("Acceleration", plot_acceleration)
+        create_plot_tab("Tilt Error", plot_tilt_error)
+        create_plot_tab("Gimbal Command", plot_gimbal_cmd)
+        create_plot_tab("3D Trajectory", plot_3d_trajectory)
+
+        root.mainloop()
+
     else:
         print("\n--- Monte Carlo Simulation Results ---")
-        print("No successful flights were recorded.")
+        print("No simulation runs were completed.")
         print("------------------------------------")
