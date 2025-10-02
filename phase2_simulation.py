@@ -12,8 +12,13 @@ import sys
 G = 9.80665
 DRY_MASS = 0.5
 PROPELLANT_MASS = 0.8
-ENGINE_BURN_TIME = 1.0
-THRUST_FORCE = 150.0
+# Baseline Thrust Curve Data (Time in seconds, Thrust in Newtons)
+# Represents a typical solid motor: initial peak, sustain, and tail-off
+TIME_POINTS = np.array([0.0, 0.2, 3.8, 4.2, 4.3])
+THRUST_POINTS = np.array([0.0, 75.0, 70.0, 15.0, 0.0])
+# Total impulse is the area under the thrust curve
+TOTAL_IMPULSE = np.trapz(THRUST_POINTS, TIME_POINTS)
+ENGINE_BURN_TIME = TIME_POINTS[-1]
 INERTIA_TENSOR = np.diag([0.01, 0.01, 0.001])
 INERTIA_TENSOR_INV = np.linalg.inv(INERTIA_TENSOR)
 AIR_DENSITY = 1.225
@@ -59,10 +64,17 @@ class PIDController:
 
 # --- Equations of Motion ---
 def rocket_dynamics(t, state, pid_pitch, pid_yaw, dt):
-    pos, vel, quat, ang_vel = state[0:3], state[3:6], state[6:10], state[10:13]
+    pos, vel, quat, ang_vel, mass = state[0:3], state[3:6], state[6:10], state[10:13], state[13]
     quat /= np.linalg.norm(quat)
 
-    mass = DRY_MASS + (PROPELLANT_MASS * (1 - t / ENGINE_BURN_TIME) if t < ENGINE_BURN_TIME else 0)
+    # Get current thrust from the thrust curve
+    current_thrust = np.interp(t, TIME_POINTS, THRUST_POINTS)
+
+    # Calculate mass flow rate
+    mass_flow_rate = 0.0
+    if t < ENGINE_BURN_TIME and current_thrust > 0:
+        mass_flow_rate = (PROPELLANT_MASS / TOTAL_IMPULSE) * current_thrust
+
     F_g = np.array([0, 0, -mass * G])
 
     v_rel = -vel
@@ -79,11 +91,10 @@ def rocket_dynamics(t, state, pid_pitch, pid_yaw, dt):
         error_pitch = z_axis_world[1]
         error_yaw = -z_axis_world[0]
 
-        # Definitive Corrected Control Logic for Negative Feedback
         gimbal_pitch_cmd = -pid_pitch.update(error_pitch, dt)
         gimbal_yaw_cmd = -pid_yaw.update(error_yaw, dt)
 
-        F_thrust_body = THRUST_FORCE * np.array([
+        F_thrust_body = current_thrust * np.array([
             np.sin(gimbal_yaw_cmd),
             np.sin(gimbal_pitch_cmd),
             np.cos(gimbal_pitch_cmd)*np.cos(gimbal_yaw_cmd)
@@ -102,12 +113,16 @@ def rocket_dynamics(t, state, pid_pitch, pid_yaw, dt):
     omega_matrix = np.array([[0,-omega_x,-omega_y,-omega_z],[omega_x,0,omega_z,-omega_y],[omega_y,-omega_z,0,omega_x],[omega_z,omega_y,-omega_x,0]])
     quat_dot = 0.5 * omega_matrix @ quat
 
-    return np.concatenate((pos_dot, vel_dot, quat_dot, omega_dot))
+    dm_dt = -mass_flow_rate
+
+    return np.concatenate((pos_dot, vel_dot, quat_dot, omega_dot, [dm_dt]))
 
 # --- Main Simulation Loop ---
 if __name__ == "__main__":
-    initial_state = np.zeros(13)
+    initial_state = np.zeros(14)
     initial_state[6] = 1.0 # qw = 1
+    initial_state[13] = DRY_MASS + PROPELLANT_MASS # Initial total mass
+
     # As per prompt, disturbance is on state[11]
     initial_state[11] = YAW_INIT
 
@@ -172,48 +187,12 @@ if __name__ == "__main__":
     print(logs)
     print("---------------------------\n")
 
-    print("Generating interactive plot window...")
-
-    # --- Create Tabbed Plot Window ---
-    root = tk.Tk()
-    root.title("Rocket Simulation Analysis")
-    notebook = ttk.Notebook(root)
-    notebook.pack(pady=10, padx=10, expand=True, fill="both")
-
-    def create_plot_tab(tab_name, plot_function):
-        frame = ttk.Frame(notebook, width=800, height=600)
-        notebook.add(frame, text=tab_name)
-        
-        fig = Figure(figsize=(10, 7), dpi=100)
-        fig.set_tight_layout(True)
-        
-        plot_function(fig)
-        
-        canvas = FigureCanvasTkAgg(fig, master=frame)
-        canvas.draw()
-        canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
-
-    # --- Define Plotting Functions for each Tab ---
-    def plot_position(fig):
+    # --- Define Plotting Functions ---
+    def plot_altitude(fig):
         ax = fig.add_subplot(111)
-        ax.plot(logs['time'], logs['state'][:,0], label='X Position')
-        ax.plot(logs['time'], logs['state'][:,1], label='Y Position')
-        ax.plot(logs['time'], logs['state'][:,2], label='Z Position (Altitude)')
-        ax.set_title("Position vs. Time")
-        ax.set_xlabel("Time (s)"); ax.set_ylabel("Position (m)")
-        ax.legend(); ax.grid(True)
-
-    def plot_velocity(fig):
-        ax = fig.add_subplot(111)
-        ax.plot(logs['time'], logs['state'][:,3], label='Vx'); ax.plot(logs['time'], logs['state'][:,4], label='Vy'); ax.plot(logs['time'], logs['state'][:,5], label='Vz')
-        ax.set_title("Velocity Components vs. Time"); ax.set_xlabel("Time (s)"); ax.set_ylabel("Velocity (m/s)")
-        ax.legend(); ax.grid(True)
-
-    def plot_acceleration(fig):
-        ax = fig.add_subplot(111)
-        accel = np.gradient(logs['state'][:, 3:6], logs['time'], axis=0)
-        ax.plot(logs['time'], accel[:,0], label='Ax'); ax.plot(logs['time'], accel[:,1], label='Ay'); ax.plot(logs['time'], accel[:,2], label='Az')
-        ax.set_title("Acceleration Components vs. Time"); ax.set_xlabel("Time (s)"); ax.set_ylabel("Acceleration (m/s^2)")
+        ax.plot(logs['time'], logs['state'][:,2], label='Altitude')
+        ax.set_title("Altitude vs. Time")
+        ax.set_xlabel("Time (s)"); ax.set_ylabel("Altitude (m)")
         ax.legend(); ax.grid(True)
 
     def plot_tilt_error(fig):
@@ -228,19 +207,53 @@ if __name__ == "__main__":
         ax.set_title("Gimbal Command vs. Time"); ax.set_xlabel("Time (s)"); ax.set_ylabel("Angle (degrees)")
         ax.legend(); ax.grid(True)
 
-    def plot_3d_trajectory(fig):
-        ax = fig.add_subplot(111, projection='3d')
-        position = logs['state'][:, 0:3].T
-        ax.plot(position[0], position[1], position[2], label='Trajectory')
-        ax.set_xlabel("X (m)"); ax.set_ylabel("Y (m)"); ax.set_zlabel("Z (m)")
-        ax.set_title("3D Trajectory"); ax.legend(); ax.axis('equal')
+    def plot_thrust(fig):
+        ax = fig.add_subplot(111)
+        t_eval = np.linspace(0, logs['time'][-1] if len(logs['time']) > 0 else t_end, 500)
+        thrust_values = np.interp(t_eval, TIME_POINTS, THRUST_POINTS)
+        ax.plot(t_eval, thrust_values, label='Thrust')
+        ax.set_title("Thrust (N) vs. Time (s)")
+        ax.set_xlabel("Time (s)"); ax.set_ylabel("Thrust (N)")
+        ax.legend(); ax.grid(True)
 
-    # --- Create all tabs ---
-    create_plot_tab("Position", plot_position)
-    create_plot_tab("Velocity", plot_velocity)
-    create_plot_tab("Acceleration", plot_acceleration)
-    create_plot_tab("Tilt Error", plot_tilt_error)
-    create_plot_tab("Gimbal Command", plot_gimbal_cmd)
-    create_plot_tab("3D Trajectory", plot_3d_trajectory)
+    plot_definitions = [
+        {"name": "Altitude", "func": plot_altitude, "suffix": "altitude"},
+        {"name": "Tilt", "func": plot_tilt_error, "suffix": "tilt"},
+        {"name": "Gimbal", "func": plot_gimbal_cmd, "suffix": "gimbal"},
+        {"name": "Thrust", "func": plot_thrust, "suffix": "thrust"}
+    ]
 
-    root.mainloop()
+    # --- Save all plots to files ---
+    print("Saving plots to files...")
+    for plot_def in plot_definitions:
+        fig = Figure(figsize=(10, 7), dpi=100)
+        fig.set_tight_layout(True)
+        plot_def["func"](fig)
+        filename = f"phase2_tc_{plot_def['suffix']}.png"
+        fig.savefig(filename)
+        print(f"Saved plot to {filename}")
+
+    # --- Create Tabbed Plot Window (optional) ---
+    try:
+        print("\nGenerating interactive plot window...")
+        root = tk.Tk()
+        root.title("Rocket Simulation Analysis")
+        notebook = ttk.Notebook(root)
+        notebook.pack(pady=10, padx=10, expand=True, fill="both")
+
+        for plot_def in plot_definitions:
+            frame = ttk.Frame(notebook, width=800, height=600)
+            notebook.add(frame, text=plot_def["name"])
+
+            fig = Figure(figsize=(10, 7), dpi=100)
+            fig.set_tight_layout(True)
+            plot_def["func"](fig)
+
+            canvas = FigureCanvasTkAgg(fig, master=frame)
+            canvas.draw()
+            canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+
+        root.mainloop()
+    except tk.TclError as e:
+        print(f"Could not start GUI (is a display available?): {e}")
+        print("Plots were saved to files. Exiting.")
