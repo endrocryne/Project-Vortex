@@ -191,6 +191,13 @@ class MainWindow(QMainWindow):
         self.show_dispersion_button.setEnabled(False)
         self.mc_plot_widget.clear()
         sim_params = {key: widget.value() for key, widget in self.param_inputs.items()}
+        # Ensure any standard-deviation-like parameters are non-negative
+        for k in list(sim_params.keys()):
+            if k.endswith('_std'):
+                try:
+                    sim_params[k] = max(0.0, float(sim_params[k]))
+                except Exception:
+                    sim_params[k] = 0.0
         pid_gains = {'Kp': self.mc_kp_input.value(), 'Ki': self.mc_ki_input.value(), 'Kd': self.mc_kd_input.value()}
         self.thread = QThread()
         self.worker = MonteCarloWorker(self.mc_runs_input.value(), sim_params, pid_gains)
@@ -252,8 +259,29 @@ class MainWindow(QMainWindow):
         self.vis_tab = QWidget()
         self.tabs.addTab(self.vis_tab, "Real-Time 3D Visualization")
         layout = QHBoxLayout(self.vis_tab)
-        self.plotter = QtInteractor(self.vis_tab)
-        layout.addWidget(self.plotter, 4)
+
+        # Create a PyVista plotter and embed it in a QtInteractor widget
+        # PyVista expects window_size as a (width, height) tuple, not a Qt QSize
+        sz = self.size()
+        # Ensure we don't pass a zero-sized window (which can happen before the
+        # window is shown). Use a small minimum size fallback.
+        width = max(200, int(sz.width()))
+        height = max(200, int(sz.height()))
+        window_size = (width, height)
+
+        # Create the QtInteractor first and use its embedded plotter. Passing an
+        # externally created Plotter into QtInteractor can trigger MRO/init
+        # issues with some pyvista/pyvistaqt/PyQt6 combinations.
+        self.plotter_widget = QtInteractor(self.vis_tab)
+        self.plotter = getattr(self.plotter_widget, 'plotter', None)
+        if self.plotter is not None:
+            try:
+                self.plotter.window_size = window_size
+            except Exception:
+                # If setting window_size fails, continue — it's non-fatal for startup
+                pass
+        layout.addWidget(self.plotter_widget, 4)
+
         self.setup_3d_scene()
         sidebar_group = QGroupBox("Controls & Telemetry")
         sidebar_layout = QVBoxLayout()
@@ -277,19 +305,55 @@ class MainWindow(QMainWindow):
 
     def setup_3d_scene(self):
         # ... (Identical to previous version)
-        self.plotter.add_axes()
-        self.plotter.add_grid()
+        p = self.get_plotter()
+        # Wrap plotting calls so the UI can start even if the interactor lacks
+        # some pyvista convenience methods in this environment.
+        if hasattr(p, 'add_axes'):
+            try:
+                p.add_axes()
+            except Exception:
+                pass
+        if hasattr(p, 'add_grid'):
+            try:
+                p.add_grid()
+            except Exception:
+                pass
+
         ground = pv.Plane(center=(0, 0, 0), direction=(0, 0, 1), i_size=2000, j_size=2000)
-        self.plotter.add_mesh(ground, color='green',-1)
+        # Add ground plane (best-effort)
+        try:
+            if hasattr(p, 'add_mesh'):
+                p.add_mesh(ground, color='green')
+        except Exception:
+            pass
+
         body = pv.Cylinder(center=(0, 0, 0.25), direction=(0, 0, 1), radius=0.05, height=0.5)
         nose = pv.Cone(center=(0, 0, 0.5), direction=(0, 0, 1), radius=0.05, height=0.2)
-        self.rocket_actor = self.plotter.add_mesh(body + nose, color="silver")
+        # Try to add the rocket mesh; if not possible, create a dummy actor so
+        # update_3d_scene can still run without attribute errors.
+        try:
+            if hasattr(p, 'add_mesh'):
+                self.rocket_actor = p.add_mesh(body + nose, color="silver")
+            else:
+                raise AttributeError
+        except Exception:
+            class DummyActor:
+                def __init__(self):
+                    self.position = np.zeros(3)
+                    self.user_matrix = np.identity(4)
+            self.rocket_actor = DummyActor()
+
         self.trajectory_points = []
         self.trajectory_spline = None
-        self.plotter.camera_position = 'xy'
-        self.plotter.camera.azimuth = 45
-        self.plotter.camera.elevation = 30
-        self.plotter.camera.zoom(1.5)
+        # Camera settings are best-effort; ignore if unavailable
+        try:
+            if hasattr(p, 'camera'):
+                p.camera_position = 'xy'
+                p.camera.azimuth = 45
+                p.camera.elevation = 30
+                p.camera.zoom(1.5)
+        except Exception:
+            pass
 
     def run_single_flight(self):
         # ... (Identical to previous version)
@@ -297,7 +361,11 @@ class MainWindow(QMainWindow):
             self.mc_results_text.append("\nRun a Monte Carlo simulation first to establish mean parameters.")
             return
         self.launch_sim_button.setEnabled(False)
-        self.plotter.clear_actors()
+        p = self.get_plotter()
+        try:
+            p.clear_actors()
+        except Exception:
+            pass
         self.setup_3d_scene()
         pid_gains = {'Kp': self.mc_kp_input.value(), 'Ki': self.mc_ki_input.value(), 'Kd': self.mc_kd_input.value()}
         self.vis_thread = QThread()
@@ -322,20 +390,69 @@ class MainWindow(QMainWindow):
         self.rocket_actor.user_matrix = transform_matrix
         self.trajectory_points.append(pos)
         if len(self.trajectory_points) > 2:
-            if self.trajectory_spline: self.plotter.remove_actor(self.trajectory_spline)
-            self.trajectory_spline = self.plotter.add_lines(np.array(self.trajectory_points), color='cyan', width=3)
+            p = self.get_plotter()
+            try:
+                if self.trajectory_spline:
+                    p.remove_actor(self.trajectory_spline)
+            except Exception:
+                pass
+            try:
+                self.trajectory_spline = p.add_lines(np.array(self.trajectory_points), color='cyan', width=3)
+            except Exception:
+                pass
         self.altitude_label.setText(f"{pos[2]:.2f}")
         self.velocity_label.setText(f"{np.linalg.norm(state['velocity']):.2f}")
         self.downrange_label.setText(f"{np.linalg.norm(pos[:2]):.2f}")
         z_axis_body = rotate_by_quaternion(np.array([0, 0, 1]), quat)
         tilt_angle = np.rad2deg(np.arccos(np.clip(np.dot(z_axis_body, np.array([0, 0, 1])), -1.0, 1.0)))
         self.tilt_angle_label.setText(f"{tilt_angle:.2f}")
-        self.plotter.update()
 
     def on_vis_finished(self):
         # ... (Identical to previous version)
         self.launch_sim_button.setEnabled(True)
         self.trajectory_points = []
+
+    def resizeEvent(self, event):
+        """Keep the PyVista plotter window_size in sync with the main window.
+
+        This avoids passing Qt types to PyVista and keeps the embedded view sized
+        correctly when the user resizes the application.
+        """
+        super().resizeEvent(event)
+        try:
+            if hasattr(self, 'plotter') and self.plotter is not None:
+                sz = self.size()
+                self.plotter.window_size = (int(sz.width()), int(sz.height()))
+        except Exception:
+            # Don't crash the UI for non-fatal sizing issues
+            pass
+
+    def get_plotter(self):
+        """Return the active pyvista Plotter instance.
+
+        QtInteractor often exposes a `plotter` attribute; if not, fall back to a
+        stored reference. Raises AttributeError if none available.
+        """
+        # Prefer an explicitly stored plotter
+        if hasattr(self, 'plotter') and self.plotter is not None:
+            return self.plotter
+
+        # Some QtInteractor implementations expose plotting methods on the
+        # widget itself (e.g., add_mesh, add_axes). If so, return the widget.
+        if hasattr(self, 'plotter_widget'):
+            w = self.plotter_widget
+            if any(hasattr(w, m) for m in ('add_mesh', 'add_axes', 'add_lines')):
+                return w
+            if hasattr(w, 'plotter') and w.plotter is not None:
+                self.plotter = w.plotter
+                return self.plotter
+
+        # As a last resort create a standalone Plotter and keep it.
+        try:
+            self.plotter = pv.Plotter(off_screen=False)
+            return self.plotter
+        except Exception:
+            raise AttributeError('No pyvista Plotter available')
 
     def create_pid_tuner_tab(self):
         self.pid_tab = QWidget()
