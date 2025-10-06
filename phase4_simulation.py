@@ -10,7 +10,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 
 # --- Monte Carlo Parameters ---
-N_RUNS = 4
+N_RUNS = 1
 
 # The base thrust curve is the mean. STD is the per-point variation.
 THRUST_CURVE_STD = 0.05 # 5% Variation
@@ -67,13 +67,13 @@ THRUST_POINTS_BASE = np.array([
 ])
 
 ENGINE_BURN_TIME = TIME_POINTS[-1]
-INERTIA_TENSOR = np.diag([0.01, 0.01, 0.001])
+INERTIA_TENSOR = np.diag([0.007, 0.007, 0.0001])  # Inertia tensor matching rocketpy-sim values
 INERTIA_TENSOR_INV = np.linalg.inv(INERTIA_TENSOR)
-ROCKET_DIAMETER = 0.034 # 34mm diameter
+ROCKET_DIAMETER = 0.034  # 34mm diameter (same as rocketpy-sim)
 ROCKET_AREA = np.pi * (ROCKET_DIAMETER / 2)**2
 # --- Advanced Aerodynamics ---
 GIMBAL_VECTOR = np.array([0, 0, -1.0]) # Location of gimbal pivot relative to CoM
-KP, KI, KD = 0.05, 0.1, 0.01 # PID gains are now constant
+KP, KI, KD = 0.0, 0.0, 0.0 # PID gains are now constant
 MAX_GIMBAL_ANGLE = np.deg2rad(10) # Limit gimbal to 10 degrees
 
 # --- Helper Functions ---
