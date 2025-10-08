@@ -1,6 +1,11 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from rocketpy import Environment, SolidMotor, Rocket, Flight
+from rocketpy.motors.motor import Motor
+
+# --- TVC & PID Parameters ---
+KP, KI, KD = 0.0, 0.0, 0.0 # Proportional, Integral, Derivative gains
+MAX_GIMBAL_ANGLE = 5 # degrees
 
 # --- Parameters from the original script ---
 
@@ -24,6 +29,70 @@ thrust_curve = np.array([TIME_POINTS, THRUST_POINTS_BASE]).T
 
 # Environment
 GROUND_WIND_SPEED_MEAN = 4.0  # m/s
+
+# --- PID Controller Class ---
+class PIDController:
+    """A simple PID controller."""
+    def __init__(self, Kp, Ki, Kd, setpoint=0):
+        self.Kp, self.Ki, self.Kd = Kp, Ki, Kd
+        self.setpoint = setpoint
+        self._integral = 0
+        self._prev_error = 0
+        self.last_output = 0
+
+    def update(self, measured_value, dt):
+        if dt <= 0:
+            return self.last_output
+        error = self.setpoint - measured_value
+        self._integral += error * dt
+        derivative = (error - self._prev_error) / dt
+        self._prev_error = error
+        self.last_output = self.Kp * error + self.Ki * self._integral + self.Kd * derivative
+        return self.last_output
+
+    def reset(self):
+        self._integral = 0
+        self._prev_error = 0
+        self.last_output = 0
+
+# --- TVC Rocket Class ---
+class TVCRocket(Rocket):
+    """A Rocket subclass with a built-in TVC system."""
+    def __init__(self, *args, **kwargs):
+        self.pitch_pid = PIDController(KP, KI, KD)
+        self.yaw_pid = PIDController(KP, KI, KD)
+        self.max_gimbal_angle_rad = np.deg2rad(MAX_GIMBAL_ANGLE)
+        super().__init__(*args, **kwargs)
+        
+    def add_motor(self, motor: Motor, position: float):
+        """Overrides the default add_motor to reset PID controllers."""
+        self.pitch_pid.reset()
+        self.yaw_pid.reset()
+        return super().add_motor(motor, position)
+
+    def _control_function(self, time, sampling_rate, state, state_history):
+        """This function is called at each simulation time step to update the gimbal."""
+        # Unpack quaternion and angular velocities from state vector
+        e0, e1, e2, e3 = state[6], state[7], state[8], state[9]
+
+        # Convert quaternion to rotation matrix to find body Z-axis in world frame
+        R = np.array([
+            [1 - 2*(e2**2 + e3**2), 2*(e1*e2 - e3*e0), 2*(e1*e3 + e2*e0)],
+            [2*(e1*e2 + e3*e0), 1 - 2*(e1**2 + e3**2), 2*(e2*e3 - e1*e0)],
+            [2*(e1*e3 - e2*e0), 2*(e2*e3 + e1*e0), 1 - 2*(e1**2 + e2**2)]
+        ])
+        body_z_axis_world = R[:, 2]
+
+        # Update PID controllers and set thrust eccentricity
+        gimbal_pitch_angle = self.pitch_pid.update(body_z_axis_world[0], 1/sampling_rate) # Correcting Y-tilt
+        gimbal_yaw_angle = self.yaw_pid.update(-body_z_axis_world[1], 1/sampling_rate) # Correcting X-tilt
+
+        # Clip gimbal angles to physical limits
+        gimbal_pitch_angle = np.clip(gimbal_pitch_angle, -self.max_gimbal_angle_rad, self.max_gimbal_angle_rad)
+        gimbal_yaw_angle = np.clip(gimbal_yaw_angle, -self.max_gimbal_angle_rad, self.max_gimbal_angle_rad)
+
+        # Apply gimbal angles to the motor's thrust vector
+        self.motor.gimbal = [gimbal_pitch_angle, gimbal_yaw_angle]
 
 # --- 1. Environment Setup ---
 print("Setting up the environment...")
@@ -58,7 +127,7 @@ motor = SolidMotor(
 
 # --- 3. Rocket Definition ---
 print("\nDefining the rocket structure...")
-rocket = Rocket(
+rocket = TVCRocket(
     radius=ROCKET_DIAMETER / 2,
     mass=DRY_MASS_MEAN,
     inertia=(.007, .007, .0001),
@@ -69,6 +138,7 @@ rocket = Rocket(
     # The value is an estimate in meters from the rocket's tail (position 0).
     center_of_mass_without_motor=0.15
 )
+
 rocket.add_motor(motor, position=0)
 nose_cone = rocket.add_nose(length=0.10, kind="ogive", position=0.35)
 fins = rocket.add_trapezoidal_fins(
@@ -80,15 +150,15 @@ fins = rocket.add_trapezoidal_fins(
 )
 
 # --- 4. Parachute System ---
-print("\nAdding parachute system...")
-main_chute = rocket.add_parachute(
-    "Main",
-    cd_s=1.0,
-    trigger="apogee",
-    sampling_rate=105,
-    lag=1.5,
-    noise=(0, 8.3, 0.5),
-)
+# print("\nAdding parachute system...")
+# main_chute = rocket.add_parachute(
+#     "Main",
+#     cd_s=1.0,
+#     trigger="apogee",
+#     sampling_rate=105,
+#     lag=1.5,
+#     noise=(0, 8.3, 0.5),
+# )
 
 # --- 5. Flight Simulation ---
 print("\nSimulating flight...")
@@ -98,7 +168,12 @@ test_flight = Flight(
     rail_length=1.0,
     inclination=85,
     heading=0,
-    max_time=30.0
+    max_time=30.0,
+    time_overshoot=False, # Important for control system stability
+    # Add the initial disturbance here to test the TVC
+    initial_solution=[0,0,0,0,0,0,1,0,0,0,0.1,0.1,0],
+    # (Using default solver tolerances. Removing explicit `atol` avoids
+    # shape mismatches with the integrator's expected state vector length.)
 )
 
 # --- 6. Display Results ---
@@ -109,6 +184,20 @@ test_flight.prints.all()
 print("\nGenerating standard plots...")
 test_flight.plots.trajectory_3d()
 test_flight.plots.linear_kinematics()
+test_flight.plots.attitude()
+
+# --- Custom plot for Gimbal Angles ---
+print("\nGenerating Gimbal Angle plot...")
+gimbal_pitch = [np.rad2deg(angle[0]) for angle in test_flight.gimbal_angle]
+gimbal_yaw = [np.rad2deg(angle[1]) for angle in test_flight.gimbal_angle]
+plt.figure(figsize=(10, 6))
+plt.plot(test_flight.t, gimbal_pitch, label='Gimbal Pitch')
+plt.plot(test_flight.t, gimbal_yaw, label='Gimbal Yaw')
+plt.title("Gimbal Angles vs. Time")
+plt.xlabel("Time (s)")
+plt.ylabel("Angle (degrees)")
+plt.legend()
+plt.grid(True)
 
 # --- 8. Custom Position vs. Time Plot ---
 print("\nGenerating custom Position vs. Time plot...")
