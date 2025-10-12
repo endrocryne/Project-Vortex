@@ -1,16 +1,18 @@
-# 6-DOF Rocket Simulation with Environmental & Hardware Imperfections (Phase 4)
+# 6-DOF Rocket Simulation with RocketPy Engine (Phase 4)
 
-This project is a 6-Degrees-of-Freedom (6DOF) rocket simulation written in Python. It builds upon a simpler model by incorporating more realistic environmental conditions and hardware imperfections, providing a more challenging and accurate simulation of a rocket's flight dynamics under thrust vector control (TVC).
+This project is a 6-Degrees-of-Freedom (6DOF) rocket simulation written in Python. It uses the **RocketPy** library to model the flight of a rocket under thrust vector control (TVC), incorporating realistic environmental conditions and hardware imperfections.
 
 The simulation uses a Monte Carlo approach to analyze the rocket's performance and stability across a range of randomized parameters, including atmospheric conditions, hardware characteristics, and initial state disturbances.
 
 ## Features
 
-*   **6-DOF Dynamics**: Simulates the rocket's position, velocity, orientation (using quaternions), and angular velocity in 3D space.
-*   **Monte Carlo Analysis**: Runs hundreds or thousands of simulations with randomized parameters to generate statistical data on performance metrics like apogee, landing distance, and flight stability.
-*   **Variable Wind Model**: Implements a wind power law (`V_wind(h) = V_ground * (h / 10.0)**0.15`) to simulate increasing wind speed with altitude, affecting the rocket's trajectory.
-*   **Noisy Sensor Model**: The PID controller's error calculations are contaminated with Gaussian noise to simulate imperfections in the gyroscope. Apogee detection is also affected by noisy barometer readings.
-*   **Actuator Dynamics**: Models the gimbaled engine mount (actuators) as a first-order system with a time delay (tau) and precision noise, meaning the control system's commands are not executed instantly or perfectly.
+*   **RocketPy Engine**: Utilizes the powerful and validated RocketPy library for all flight dynamics calculations.
+*   **6-DOF Dynamics**: Simulates the rocket's position, velocity, orientation, and angular velocity in 3D space.
+*   **Monte Carlo Analysis**: Runs simulations with randomized parameters to generate statistical data on performance metrics like apogee, landing distance, and flight stability.
+*   **Thrust Vector Control (TVC)**: Implements a custom PID controller that interfaces with the RocketPy engine by manipulating the rocket's `thrust_eccentricity`, simulating a gimbaled motor.
+*   **Hardware Imperfection Modeling**:
+    *   **Noisy Sensors**: The PID controller's error calculations are contaminated with Gaussian noise to simulate imperfections in the gyroscope.
+    *   **Actuator Dynamics**: The TVC actuators are modeled as a first-order system with a time delay (tau) and precision noise, meaning control commands are not executed instantly or perfectly.
 *   **Detailed Output**: Generates summary statistics, raw data CSV files, aggregate distribution plots (apogee, landing distance, stability), and an interactive GUI showing detailed plots for a single flight with mean parameters.
 
 ## Quick Start
@@ -19,10 +21,10 @@ Follow these steps to get the simulation running.
 
 ### 1. Installation
 
-The simulation relies on a few common scientific computing libraries for Python. You can install them using pip:
+The simulation now depends on the **RocketPy** library and its dependencies. The `rocketpy` library is included in this repository, so you do not need to install it separately. You can install all other necessary packages using pip:
 
 ```bash
-pip install numpy scipy matplotlib
+pip install numpy scipy matplotlib pandas netCDF4 requests pytz simplekml dill
 ```
 
 ### 2. Running the Simulation
@@ -49,9 +51,9 @@ The primary way to configure the simulation is by modifying the global parameter
     *   Thrust and propellant mass.
     *   Aerodynamic coefficients.
     *   Initial orientation disturbances.
-    *   **Ground wind speed**.
-    *   **Sensor noise levels**.
-    *   **Actuator response time and precision**.
+    *   Ground wind speed.
+    *   Sensor noise levels.
+    *   Actuator response time and precision.
 
 ## Debugging and Troubleshooting
 
