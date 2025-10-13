@@ -1,2 +1,0 @@
-run_number,stable,apogee,flight_time,landing_distance,landing_x,landing_y,landing_vel_x,landing_vel_y,landing_vel_z,landing_tilt_deg,apogee_vel_x,apogee_vel_y,apogee_vel_z,apogee_tilt_deg
-1,True,0.0,3.4212166357768434e-14,1.771034939747779e-17,-1.7710346369163536e-17,-1.0356881668841757e-20,-2.1631058489540722e-12,-1.264925122111682e-15,-3.4147551865142123e-13,0.0,,,,
