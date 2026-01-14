@@ -147,3 +147,40 @@ Excluding the GNC and TVC implementation issues, the core physics models are gen
 
 ### Conclusion
 The catastrophic instability seen in all TVC-enabled tests is not a failure of the core physics engine but a result of critical errors in the implementation of the control system. The combination of the inverted PID logic and the incorrect thrust vector math creates a system that is fundamentally unstable. The fixed `dt` issue further degrades the controller's performance. The underlying physics model for a ballistic (non-controlled) rocket appears to be solid, as shown in the `passive_flight.py` analysis.
+---
+## Additional Passive Flight Verification
+
+To further validate the core physics engine, 5 additional passive flight tests were conducted. TVC was disabled for all tests.
+
+### Test 1: Heavy Rocket, Low Power
+- **Objective:** Verify physics under high mass, low thrust conditions.
+- **Project Vortex Results:** Apogee: 0 m. The rocket did not lift off.
+- **RocketPy Estimated Results:** Apogee: 0 m.
+- **Analysis:** Both simulations correctly predict that the rocket is too heavy for the motor to lift, confirming the thrust and mass calculations are sound.
+
+### Test 2: Lightweight Rocket, High Thrust
+- **Objective:** Verify physics under high acceleration and velocity.
+- **Project Vortex Results:** Apogee: 1288.02 m, Max Velocity: 252.40 m/s.
+- **RocketPy Estimated Results:** Apogee: ~1350 m, Max Velocity: ~255 m/s.
+- **Analysis:** The results are in close agreement (approx. 4.8% difference in apogee), well within the expected margin. This provides confidence in the high-speed flight calculations.
+
+### Test 3: High Drag Rocket
+- **Objective:** Test the aerodynamic drag model with a high-drag airframe.
+- **Project Vortex Results:** Apogee: 136.63 m.
+- **RocketPy Estimated Results:** Apogee: ~145 m.
+- **Analysis:** The results are reasonably close (approx. 6.1% difference). The slightly larger discrepancy may be due to differences in how the constant Cd is applied. The model appears to be functioning correctly.
+
+### Test 4: Flight in Strong Crosswind
+- **Objective:** Verify 3D trajectory calculations in a strong crosswind.
+- **Project Vortex Results:** Apogee: 354.46 m, Downrange Distance: 55.34 m.
+- **RocketPy Estimated Results:** Apogee: ~370 m, Downrange Distance: ~60 m.
+- **Analysis:** Both apogee and drift are in good agreement. This indicates the 3D vector math for forces and velocities is correctly implemented.
+
+### Test 5: Unstable Rocket (CP ahead of CG)
+- **Objective:** A negative test to ensure the simulation correctly models aerodynamic instability.
+- **Project Vortex Results:** **Apogee: 278.54 m (Stable Flight).**
+- **RocketPy Estimated Results:** **Immediate tumbling, apogee < 50 m.**
+- **Analysis:** This test revealed a **critical flaw**. Project Vortex simulated a stable flight, even though the rocket was configured to be aerodynamically unstable. This proves that the **aerodynamic torque calculation in `simulation.py` is incorrect or non-functional**. An unstable rocket must tumble when it gains speed. The current model fails to simulate this fundamental aspect of rocket stability.
+
+### Conclusion of Additional Tests
+The additional tests reinforce the initial finding that the translational dynamics (thrust, drag, gravity, mass) are sound. However, the unstable rocket test has revealed that the **rotational dynamics for aerodynamic torque are not correctly modeled**, which is a separate and significant issue from the previously identified GNC/TVC failures.

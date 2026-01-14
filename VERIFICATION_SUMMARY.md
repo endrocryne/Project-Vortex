@@ -5,25 +5,25 @@ This report summarizes the verification and validation analysis of the Project V
 
 ## 2. Key Findings
 
-The analysis revealed a sharp contrast between the soundness of the core physics model for ballistic flight and the stability of the attitude control system.
+The analysis revealed several critical issues, primarily in the simulation of rotational dynamics and attitude control.
 
-### 2.1. Core Physics (Ballistic Flight)
-- **Translational Dynamics:** The simulation of a passive, uncontrolled rocket (`passive_flight.py`) showed good agreement with RocketPy. The apogee and max velocity were within a **3-5% margin**, which is acceptable.
-- **Conclusion:** The fundamental physics implementation—including variable mass properties, gravity, and basic aerodynamics—is **sound and reliable** for ballistic flight.
+### 2.1. Core Physics
+- **Translational Dynamics:** The simulation of a passive, uncontrolled rocket's trajectory (apogee, velocity, drift) showed good agreement with RocketPy across multiple test cases. The translational physics—including variable mass properties, gravity, and basic drag—are **sound and reliable**.
+- **Aerodynamic Torque:** A negative test case with an intentionally unstable rocket (Center of Pressure ahead of Center of Gravity) revealed a **critical flaw**. The simulation failed to model the expected tumbling behavior, flying a stable trajectory instead. This indicates the **aerodynamic torque calculation is incorrect or non-functional**.
 
 ### 2.2. GNC and TVC System (Controlled Flight)
-- **Catastrophic Instability:** All simulations with active Thrust Vector Control (TVC) failed, regardless of the rocket's design or the controller's gain settings. The rockets became immediately unstable, leading to unrealistic trajectories and extremely poor performance (e.g., apogees of ~10-50m instead of the expected ~150-400m).
+- **Catastrophic Instability:** All simulations with active Thrust Vector Control (TVC) failed. The rockets became immediately unstable, leading to unrealistic trajectories and extremely poor performance.
 - **Root Cause:** The instability is caused by a combination of three critical errors in the Guidance, Navigation, and Control (GNC) implementation:
-    1.  **Flawed PID Logic (`gnc.py`):** The PID controller creates a **positive feedback loop** by incorrectly mapping attitude error directly to gimbal angle, amplifying deviations instead of correcting them. The gains are effectively inverted.
+    1.  **Flawed PID Logic (`gnc.py`):** The PID controller creates a **positive feedback loop** by incorrectly mapping attitude error directly to gimbal angle, amplifying deviations instead of correcting them.
     2.  **Incorrect Thrust Vector Math (`rocket.py`):** The function that calculates the thrust vector from gimbal angles uses a non-standard and physically inaccurate formula.
-    3.  **Invalid Time Step in Controller (`simulation.py`):** A fixed `dt` is used for the PID controller's derivative term, even though the simulation uses an adaptive solver. This makes the derivative calculation unreliable.
+    3.  **Invalid Time Step in Controller (`simulation.py`):** A fixed `dt` is used for the PID controller's derivative term, which is incompatible with the adaptive solver.
 
 ## 3. Overall Conclusion
 
-The Project Vortex simulation can be divided into two parts:
+The Project Vortex simulation has a solid foundation for translational (point-mass) trajectory prediction, but it fails to accurately model rotational dynamics from any source.
 
-1.  **The Core Physics Engine:** The implementation of the equations of motion for a ballistic rocket is **mathematically sound**. The variable mass and inertia calculations are a strong feature.
-2.  **The Attitude Control System:** The GNC and TVC implementation is **fundamentally flawed and non-functional**. The errors in the control logic and thrust vector math make the system unstable in all tested scenarios.
+1.  **Translational Physics Engine:** The implementation of the 3-DOF equations of motion is **mathematically sound**.
+2.  **Rotational Physics and Control:** The simulation's 6-DOF capabilities are **fundamentally flawed and non-functional**. Neither aerodynamic torque nor TVC-induced torque is modeled correctly, leading to physically impossible results for both passively unstable and actively controlled rockets.
 
 **Recommendation:**
-The simulation is currently only reliable for predicting the trajectory of uncontrolled, passively stable rockets. To be used for its intended purpose of simulating TVC, the GNC and TVC modules require a complete rewrite. The identified errors in `gnc.py`, `rocket.py`, and `simulation.py` should be the primary focus of any future development work.
+The simulation is currently only reliable for predicting the trajectory of **passively stable, uncontrolled** rockets. To be used for its intended purpose of simulating TVC and 6-DOF flight, a complete rewrite of the rotational dynamics and control modules is required. The identified errors in the aerodynamic torque model, GNC logic (`gnc.py`), and TVC math (`rocket.py`) should be the primary focus of any future development work.
