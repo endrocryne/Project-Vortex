@@ -14,6 +14,28 @@ Project Vortex is a comprehensive physics-based simulation of a Thrust Vector Co
 - **Logarithmic wind shear** and turbulence
 - **Standard atmosphere model** for variable air density
 
+![Simulation Results](https://github.com/user-attachments/assets/cce83c97-0183-4b79-ad7c-59370b8b7a7a)
+
+*Example output showing 3D trajectory, altitude, velocity, attitude angles, and TVC gimbal actuation*
+
+## Quick Start
+
+```bash
+# Clone and setup
+git clone https://github.com/endrocryne/Project-Vortex.git
+cd Project-Vortex
+pip install -r requirements.txt
+
+# Run basic simulation
+python main.py
+
+# Try examples
+cd examples
+python high_altitude_flight.py
+python windy_conditions.py
+python passive_flight.py
+```
+
 ## Features
 
 ### Physics Implementation
@@ -100,6 +122,16 @@ The simulation produces:
 - **Flight summary** with key metrics
 
 Results are saved as `tvc_simulation_results.png`.
+
+## Examples
+
+The `examples/` directory contains several demonstration scenarios:
+
+- **`high_altitude_flight.py`**: G-class motor with 150m+ apogee
+- **`windy_conditions.py`**: Strong wind and turbulence testing
+- **`passive_flight.py`**: Ballistic flight without TVC control
+
+See [examples/README.md](examples/README.md) for detailed information.
 
 ## Customization
 
