@@ -55,7 +55,13 @@ class GNC:
         Args:
             target_quaternion: Desired quaternion [w, x, y, z]
         """
-        self.target_quaternion = target_quaternion / np.linalg.norm(target_quaternion)
+        # Ensure quaternion has non-zero norm before normalization
+        norm = np.linalg.norm(target_quaternion)
+        if norm < 1e-10:
+            # Default to identity quaternion if invalid
+            self.target_quaternion = np.array([1.0, 0.0, 0.0, 0.0])
+        else:
+            self.target_quaternion = target_quaternion / norm
     
     def compute_control(self, current_quaternion, angular_velocity, dt, time):
         """

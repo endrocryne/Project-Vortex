@@ -37,6 +37,11 @@ def quaternion_normalize(q):
     Returns:
         Normalized quaternion
     """
+    # Check for non-finite values (NaN or Inf)
+    if not np.all(np.isfinite(q)):
+        # Return identity quaternion if input is invalid
+        return np.array([1.0, 0.0, 0.0, 0.0])
+    
     norm = np.linalg.norm(q)
     if norm < 1e-10:
         return np.array([1.0, 0.0, 0.0, 0.0])

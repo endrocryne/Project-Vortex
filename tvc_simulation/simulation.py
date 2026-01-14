@@ -209,8 +209,11 @@ class Simulation:
         omega_cross_I_omega = np.cross(angular_velocity, I_omega)
         
         try:
-            inertia_inv = np.linalg.inv(inertia)
-            angular_acceleration = inertia_inv @ (torque_total_body - omega_cross_I_omega)
+            # Use solve instead of computing inverse explicitly (more stable and efficient)
+            angular_acceleration = np.linalg.solve(
+                inertia, 
+                torque_total_body - omega_cross_I_omega
+            )
         except np.linalg.LinAlgError:
             # If inertia is singular, no angular acceleration
             angular_acceleration = np.zeros(3)

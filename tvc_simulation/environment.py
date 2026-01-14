@@ -35,6 +35,9 @@ class Environment:
         self.R = 287.05  # Specific gas constant for air, J/(kg·K)
         self.gamma = 1.4  # Specific heat ratio for air
         
+        # Minimum temperature as fraction of sea level (prevents negative/zero temperature)
+        self.MIN_TEMPERATURE_FRACTION = 0.1  # 10% of T_0 as absolute minimum
+        
         # Wind model parameters
         self.wind_reference_speed = config.get('wind_reference_speed', 5.0)  # m/s
         self.wind_reference_altitude = config.get('wind_reference_altitude', 10.0)  # m
@@ -67,9 +70,9 @@ class Environment:
         # Temperature at altitude
         T = self.T_0 - self.temperature_lapse_rate * h
         
-        # Ensure temperature doesn't go negative
+        # Ensure temperature doesn't go negative (use minimum temperature floor)
         if T <= 0:
-            T = self.T_0 * 0.1
+            T = self.T_0 * self.MIN_TEMPERATURE_FRACTION
         
         # Density using barometric formula
         exponent = (self.gravity / (self.R * self.temperature_lapse_rate)) - 1.0
