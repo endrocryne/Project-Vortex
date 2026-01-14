@@ -27,3 +27,11 @@ The Project Vortex simulation has a solid foundation for translational (point-ma
 
 **Recommendation:**
 The simulation is currently only reliable for predicting the trajectory of **passively stable, uncontrolled** rockets. To be used for its intended purpose of simulating TVC and 6-DOF flight, a complete rewrite of the rotational dynamics and control modules is required. The identified errors in the aerodynamic torque model, GNC logic (`gnc.py`), and TVC math (`rocket.py`) should be the primary focus of any future development work.
+
+## Implemented Fixes
+- **GNC PID Logic (`gnc.py`):** The positive feedback loop has been corrected by inverting the controller gains.
+- **Thrust Vector Math (`rocket.py`):** The thrust vector calculation now uses a physically correct formula.
+
+## Known Remaining Issues (Blockers)
+- **Aerodynamic Torque Model (`simulation.py`):** The model remains non-functional. The simulation is unable to correctly model aerodynamic instability, which is a critical flaw.
+- **PID Time Step (`simulation.py`):** The PID controller's derivative term still uses an incorrect, fixed `dt`, which harms stability.

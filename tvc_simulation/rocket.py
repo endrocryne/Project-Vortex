@@ -236,12 +236,19 @@ class Rocket:
         gimbal_pitch = np.clip(gimbal_pitch, -self.max_gimbal_angle, self.max_gimbal_angle)
         gimbal_yaw = np.clip(gimbal_yaw, -self.max_gimbal_angle, self.max_gimbal_angle)
         
-        # Compute thrust vector in body frame
-        # Body frame: X points out nose, Y and Z complete right-hand rule
+        # Compute thrust vector in body frame using a standard yaw-then-pitch rotation.
+        # Body frame: X points out nose, Y is to starboard, Z is down.
+        # A positive pitch gimbal (δp) should create a negative Z force.
+        # A positive yaw gimbal (δy) should create a positive Y force.
+        cp = np.cos(gimbal_pitch)
+        sp = np.sin(gimbal_pitch)
+        cy = np.cos(gimbal_yaw)
+        sy = np.sin(gimbal_yaw)
+
         thrust_vector = thrust * np.array([
-            np.cos(gimbal_pitch) * np.cos(gimbal_yaw),
-            np.sin(gimbal_yaw),
-            np.sin(gimbal_pitch)
+            cp * cy,
+            cp * sy,
+            -sp
         ])
         
         return thrust_vector

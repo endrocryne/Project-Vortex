@@ -5,7 +5,7 @@ Passive Test Case 1: Heavy rocket with a low-power motor.
 
 import numpy as np
 import sys
-sys.path.insert(0, '..')
+sys.path.insert(0, '.')
 
 from tvc_simulation.rocket import Rocket
 from tvc_simulation.environment import Environment

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Passive Test Case 4: Flight in strong crosswind.
+Passive Test Case 2: Lightweight rocket with a high-thrust motor.
 """
 
 import numpy as np
 import sys
-sys.path.insert(0, '..')
+sys.path.insert(0, '.')
 
 from tvc_simulation.rocket import Rocket
 from tvc_simulation.environment import Environment
@@ -16,36 +16,33 @@ from tvc_simulation.utils import euler_to_quaternion
 
 def main():
     print("\\n" + "="*60)
-    print("PASSIVE TEST 4: STRONG CROSSWIND")
+    print("PASSIVE TEST 2: LIGHTWEIGHT ROCKET, HIGH THRUST")
     print("="*60 + "\\n")
 
-    # Same as passive_flight.py for direct comparison
-    thrust_time = np.array([0.0, 0.05, 0.1, 0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0, 2.1])
-    thrust_values = np.array([0.0, 25.0, 22.0, 18.0, 15.0, 14.0, 13.5, 13.0, 12.5, 12.0, 10.0, 7.0, 3.0, 0.0])
+    # High thrust motor (F-class)
+    thrust_time = np.array([0.0, 0.1, 0.5, 1.5, 2.5, 2.6])
+    thrust_values = np.array([0.0, 60.0, 55.0, 40.0, 10.0, 0.0])
 
     rocket_config = {
-        'mass_dry': 0.150,
-        'mass_fuel': 0.025,
-        'length': 0.5,
+        'mass_dry': 0.200,        # 200g dry mass
+        'mass_fuel': 0.050,       # 50g propellant
+        'length': 0.6,
         'diameter': 0.04,
-        'cd': 0.5,
-        'cp_position': 0.4,
-        'motor_position': 0.4,
-        'motor_length': 0.07,
-        'grain_outer_radius': 0.013,
-        'grain_inner_radius_initial': 0.004,
-        'grain_height': 0.07,
+        'cd': 0.45,
+        'cp_position': 0.48,
+        'motor_position': 0.48,
+        'motor_length': 0.09,
+        'grain_outer_radius': 0.015,
+        'grain_inner_radius_initial': 0.005,
+        'grain_height': 0.09,
         'thrust_curve_time': thrust_time.tolist(),
         'thrust_curve_thrust': thrust_values.tolist(),
-        'isp': 120,
-        'gimbal_position': 0.45,
+        'isp': 150,
+        'gimbal_position': 0.52,
         'max_gimbal_angle_deg': 1.0, # Not used
     }
 
-    environment_config = {
-        'wind_reference_speed': 15.0, # Strong 15 m/s wind
-        'wind_direction': np.radians(90), # From the East
-    }
+    environment_config = { 'wind_reference_speed': 2.0 } # Light wind
 
     # Disable TVC
     gnc_config = { 'kp_pitch': 0.0, 'ki_pitch': 0.0, 'kd_pitch': 0.0, 'kp_yaw': 0.0, 'ki_yaw': 0.0, 'kd_yaw': 0.0, 'control_start_time': 999 }
@@ -55,11 +52,11 @@ def main():
     gnc = GNC(gnc_config)
     simulation = Simulation(rocket, environment, gnc)
 
-    initial_quaternion = euler_to_quaternion(0.0, np.radians(-90.0), 0.0) # Vertical launch
+    initial_quaternion = euler_to_quaternion(0.0, np.radians(-89.0), 0.0) # 1 deg tilt
 
     simulation.set_initial_state([0,0,0], [0,0,0], initial_quaternion, [0,0,0])
 
-    results = simulation.run(t_span=(0.0, 30.0))
+    results = simulation.run(t_span=(0.0, 40.0))
     history = simulation.get_history()
     print_summary(history)
 

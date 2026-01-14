@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Passive Test Case 3: High drag rocket.
+Passive Test Case 5: Aerodynamically unstable rocket (CP ahead of CG).
 """
 
 import numpy as np
 import sys
-sys.path.insert(0, '..')
+sys.path.insert(0, '.')
 
 from tvc_simulation.rocket import Rocket
 from tvc_simulation.environment import Environment
@@ -16,7 +16,7 @@ from tvc_simulation.utils import euler_to_quaternion
 
 def main():
     print("\\n" + "="*60)
-    print("PASSIVE TEST 3: HIGH DRAG ROCKET")
+    print("PASSIVE TEST 5: UNSTABLE ROCKET")
     print("="*60 + "\\n")
 
     # Standard D-class motor
@@ -27,9 +27,9 @@ def main():
         'mass_dry': 0.250,
         'mass_fuel': 0.020,
         'length': 0.5,
-        'diameter': 0.08,  # Large diameter
-        'cd': 0.75,       # High drag coefficient
-        'cp_position': 0.4,
+        'diameter': 0.04,
+        'cd': 0.5,
+        'cp_position': 0.20, # CP is very far forward
         'motor_position': 0.4,
         'motor_length': 0.06,
         'grain_outer_radius': 0.012,
@@ -42,7 +42,7 @@ def main():
         'max_gimbal_angle_deg': 1.0, # Not used
     }
 
-    environment_config = { 'wind_reference_speed': 3.0 } # Moderate wind
+    environment_config = { 'wind_reference_speed': 1.0 } # Minimal wind
 
     # Disable TVC
     gnc_config = { 'kp_pitch': 0.0, 'ki_pitch': 0.0, 'kd_pitch': 0.0, 'kp_yaw': 0.0, 'ki_yaw': 0.0, 'kd_yaw': 0.0, 'control_start_time': 999 }
@@ -52,11 +52,19 @@ def main():
     gnc = GNC(gnc_config)
     simulation = Simulation(rocket, environment, gnc)
 
-    initial_quaternion = euler_to_quaternion(0.0, np.radians(-88.0), np.radians(5.0)) # 2 deg pitch, 5 deg yaw
+    # Check initial CG to confirm instability
+    initial_cg = rocket.get_cg_position()
+    print(f"Initial CG: {initial_cg:.2f} m, CP: {rocket_config['cp_position']:.2f} m")
+    if rocket_config['cp_position'] < initial_cg:
+        print("CONFIRMED: Rocket is initially unstable (CP ahead of CG)")
+    else:
+        print("WARNING: Rocket might be stable (CP behind of CG)")
+
+    initial_quaternion = euler_to_quaternion(0.0, np.radians(-90.0), 0.0) # Vertical launch
 
     simulation.set_initial_state([0,0,0], [0,0,0], initial_quaternion, [0,0,0])
 
-    results = simulation.run(t_span=(0.0, 30.0))
+    results = simulation.run(t_span=(0.0, 20.0))
     history = simulation.get_history()
     print_summary(history)
 
