@@ -92,15 +92,11 @@ class SuicideBurnSimulation:
         Returns:
             cg_location: CG location in body frame (m, along z-axis)
         """
-        if not self.use_dynamic_inertia:
-            return 0.0
-        
         # Calculate remaining fuel mass
         fuel_remaining = current_mass - self.dry_mass
         fuel_remaining = max(0.0, min(fuel_remaining, self.propellant_mass))
         
         # Fuel CG (assuming uniform distribution in tank)
-        fuel_fraction = fuel_remaining / self.propellant_mass if self.propellant_mass > 0 else 0.0
         fuel_cg_z = (self.fuel_tank_bottom + self.fuel_tank_top) / 2
         
         # Combined CG using parallel axis theorem
