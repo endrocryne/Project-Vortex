@@ -13,7 +13,7 @@ from datetime import datetime
 from simulation import SuicideBurnSimulation
 
 
-def run_single_simulation(config_file=None):
+def run_single_simulation(config_file=None, sim_overrides=None):
     """Run a single simulation with parameters"""
     
     # Default configuration
@@ -22,6 +22,7 @@ def run_single_simulation(config_file=None):
         'propellant_mass': 10.0,
         'length': 5.0,
         'diameter': 0.3,
+        'use_dynamic_inertia': False,
         'thrust_curve': [[0, 0], [0.1, 1000], [3.0, 1000], [3.1, 0]],
         'burn_time': 3.0,
         'tvc_max_angle': 5.0,
@@ -54,6 +55,10 @@ def run_single_simulation(config_file=None):
         'altimeter_error': 0.0,
         'velocity_sensor_error': 0.0
     }
+    
+    # Apply overrides
+    if sim_overrides:
+        sim_config.update(sim_overrides)
     
     # Load config if provided
     if config_file and os.path.exists(config_file):
@@ -195,7 +200,7 @@ def run_single_simulation(config_file=None):
     print("=" * 60)
 
 
-def run_optimization(config_file=None):
+def run_optimization(config_file=None, sim_overrides=None):
     """Run Monte Carlo optimization"""
     
     # Default configuration
@@ -204,6 +209,7 @@ def run_optimization(config_file=None):
         'propellant_mass': 10.0,
         'length': 5.0,
         'diameter': 0.3,
+        'use_dynamic_inertia': False,
         'thrust_curve': [[0, 0], [0.1, 1000], [3.0, 1000], [3.1, 0]],
         'burn_time': 3.0,
         'tvc_max_angle': 5.0,
@@ -237,6 +243,10 @@ def run_optimization(config_file=None):
         'velocity_sensor_error': 0.01
     }
     
+    # Apply overrides
+    if sim_overrides:
+        sim_config.update(sim_overrides)
+    
     # Load config if provided
     if config_file and os.path.exists(config_file):
         with open(config_file, 'r') as f:
@@ -266,17 +276,28 @@ def run_optimization(config_file=None):
     
     print(f"\nInitial altitude: {initial_altitude:.2f} m")
     print(f"Initial velocity: {initial_velocity:.2f} m/s")
-    print(f"Monte Carlo runs per altitude: 100")
-    print(f"Search range: ±10 m")
-    print(f"Step size: 0.1 m")
+    
+    # Get parameters from config or use defaults
+    num_mc = sim_config.get('num_monte_carlo', 100)
+    search_range = sim_config.get('altitude_search_range', 10.0)
+    alt_step = sim_config.get('altitude_step', 0.1)
+    
+    # Calculate number of altitudes to check
+    num_altitudes = int(2 * search_range / alt_step) + 1
+    
+    print(f"Monte Carlo runs per altitude: {num_mc}")
+    print(f"Search range: ±{search_range} m")
+    print(f"Step size: {alt_step} m")
+    print(f"Total altitudes to check: {num_altitudes}")
+    print(f"Total simulations: {num_mc * num_altitudes}")
     print("\nRunning optimization (this may take a few minutes)...\n")
     
     # Run optimization
     optimal_altitude, success_rates, best_history = sim.optimize_ignition_altitude(
         initial_state,
-        num_monte_carlo=100,
-        altitude_search_range=10.0,
-        altitude_step=0.1
+        num_monte_carlo=num_mc,
+        altitude_search_range=search_range,
+        altitude_step=alt_step
     )
     
     print("\n" + "=" * 60)
@@ -369,13 +390,25 @@ def main():
     parser.add_argument('--mode', choices=['single', 'optimize'], default='single',
                         help='Run mode: single simulation or optimization')
     parser.add_argument('--config', type=str, help='Configuration file (JSON)')
+    parser.add_argument('--mc-runs', type=int, help='Monte Carlo runs per altitude (default: 100)')
+    parser.add_argument('--search-range', type=float, help='Altitude search range in meters (default: 10.0)')
+    parser.add_argument('--altitude-step', type=float, help='Altitude step size in meters (default: 0.1)')
     
     args = parser.parse_args()
     
+    # Prepare config overrides
+    sim_overrides = {}
+    if args.mc_runs is not None:
+        sim_overrides['num_monte_carlo'] = args.mc_runs
+    if args.search_range is not None:
+        sim_overrides['altitude_search_range'] = args.search_range
+    if args.altitude_step is not None:
+        sim_overrides['altitude_step'] = args.altitude_step
+    
     if args.mode == 'single':
-        run_single_simulation(args.config)
+        run_single_simulation(args.config, sim_overrides)
     elif args.mode == 'optimize':
-        run_optimization(args.config)
+        run_optimization(args.config, sim_overrides)
 
 
 if __name__ == '__main__':

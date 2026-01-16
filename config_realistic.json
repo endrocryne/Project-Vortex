@@ -4,6 +4,7 @@
     "propellant_mass": 10.0,
     "length": 5.0,
     "diameter": 0.3,
+    "use_dynamic_inertia": true,
     "thrust_curve": [[0, 0], [0.1, 1000], [3.0, 1000], [3.1, 0]],
     "burn_time": 3.0,
     "tvc_max_angle": 5.0,

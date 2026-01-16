@@ -86,6 +86,10 @@ class SimulationGUI:
         self.diameter = tk.DoubleVar(value=0.3)
         ttk.Entry(frame, textvariable=self.diameter).grid(row=1, column=1)
         
+        ttk.Label(frame, text="Use Dynamic CG/Inertia:").grid(row=2, column=0, sticky='w')
+        self.use_dynamic_inertia = tk.BooleanVar(value=False)
+        ttk.Checkbutton(frame, variable=self.use_dynamic_inertia).grid(row=2, column=1, sticky='w')
+        
         # Thrust curve
         frame = ttk.LabelFrame(scrollable_frame, text="Thrust Curve", padding=10)
         frame.grid(row=2, column=0, sticky='ew', padx=5, pady=5)
@@ -319,6 +323,7 @@ class SimulationGUI:
             'propellant_mass': self.propellant_mass.get(),
             'length': self.length.get(),
             'diameter': self.diameter.get(),
+            'use_dynamic_inertia': self.use_dynamic_inertia.get(),
             'thrust_curve': self.parse_thrust_curve(),
             'burn_time': self.burn_time.get(),
             'tvc_max_angle': self.tvc_max_angle.get(),

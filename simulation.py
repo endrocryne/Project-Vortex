@@ -44,12 +44,22 @@ class SuicideBurnSimulation:
         self.length = rocket_config.get('length', 5.0)
         self.diameter = rocket_config.get('diameter', 0.3)
         
+        # Dynamic CG/inertia option
+        self.use_dynamic_inertia = rocket_config.get('use_dynamic_inertia', False)
+        
         # Moments of inertia (simplified cylinder)
+        # Initial inertia tensor
         r = self.diameter / 2
-        self.I_xx = (1/12) * self.initial_mass * (3*r**2 + self.length**2)
-        self.I_yy = self.I_xx
-        self.I_zz = (1/2) * self.initial_mass * r**2
-        self.inertia_tensor = np.diag([self.I_xx, self.I_yy, self.I_zz])
+        self.I_xx_initial = (1/12) * self.initial_mass * (3*r**2 + self.length**2)
+        self.I_yy_initial = self.I_xx_initial
+        self.I_zz_initial = (1/2) * self.initial_mass * r**2
+        self.inertia_tensor = np.diag([self.I_xx_initial, self.I_yy_initial, self.I_zz_initial])
+        
+        # CG location parameters (for dynamic calculation)
+        # Assume fuel tank at bottom, dry mass CG at center
+        self.fuel_tank_bottom = -self.length / 2  # Bottom of rocket
+        self.fuel_tank_top = 0.0  # Middle of rocket
+        self.dry_mass_cg = 0.0  # Dry mass CG at geometric center
         
         # Control parameters - PID gains for pitch (y-axis) and yaw (x-axis)
         self.tvc_kp_pitch = rocket_config.get('tvc_kp_pitch', 0.5)
@@ -71,6 +81,80 @@ class SuicideBurnSimulation:
         
         # Results storage
         self.history = None
+    
+    def calculate_dynamic_cg(self, current_mass):
+        """
+        Calculate center of gravity location as fuel burns
+        
+        Args:
+            current_mass: current vehicle mass (kg)
+            
+        Returns:
+            cg_location: CG location in body frame (m, along z-axis)
+        """
+        if not self.use_dynamic_inertia:
+            return 0.0
+        
+        # Calculate remaining fuel mass
+        fuel_remaining = current_mass - self.dry_mass
+        fuel_remaining = max(0.0, min(fuel_remaining, self.propellant_mass))
+        
+        # Fuel CG (assuming uniform distribution in tank)
+        fuel_fraction = fuel_remaining / self.propellant_mass if self.propellant_mass > 0 else 0.0
+        fuel_cg_z = (self.fuel_tank_bottom + self.fuel_tank_top) / 2
+        
+        # Combined CG using parallel axis theorem
+        if current_mass > 0:
+            cg_z = (self.dry_mass * self.dry_mass_cg + fuel_remaining * fuel_cg_z) / current_mass
+        else:
+            cg_z = self.dry_mass_cg
+        
+        return cg_z
+    
+    def calculate_dynamic_inertia(self, current_mass, cg_location):
+        """
+        Calculate inertia tensor accounting for fuel depletion and CG shift
+        
+        Args:
+            current_mass: current vehicle mass (kg)
+            cg_location: current CG location in body frame (m)
+            
+        Returns:
+            inertia_tensor: 3x3 inertia tensor in body frame
+        """
+        if not self.use_dynamic_inertia:
+            return self.inertia_tensor
+        
+        # Calculate remaining fuel mass
+        fuel_remaining = current_mass - self.dry_mass
+        fuel_remaining = max(0.0, min(fuel_remaining, self.propellant_mass))
+        
+        r = self.diameter / 2
+        
+        # Dry mass inertia about its own CG
+        I_xx_dry = (1/12) * self.dry_mass * (3*r**2 + self.length**2)
+        I_yy_dry = I_xx_dry
+        I_zz_dry = (1/2) * self.dry_mass * r**2
+        
+        # Fuel inertia (model as cylinder in tank)
+        fuel_length = (self.fuel_tank_top - self.fuel_tank_bottom) * (fuel_remaining / self.propellant_mass if self.propellant_mass > 0 else 0)
+        I_xx_fuel = (1/12) * fuel_remaining * (3*r**2 + fuel_length**2) if fuel_remaining > 0 else 0
+        I_yy_fuel = I_xx_fuel
+        I_zz_fuel = (1/2) * fuel_remaining * r**2 if fuel_remaining > 0 else 0
+        
+        # Fuel CG
+        fuel_cg_z = (self.fuel_tank_bottom + self.fuel_tank_top) / 2 if fuel_remaining > 0 else 0
+        
+        # Use parallel axis theorem to move to combined CG
+        # I_total = I_dry + m_dry * d_dry^2 + I_fuel + m_fuel * d_fuel^2
+        d_dry = self.dry_mass_cg - cg_location
+        d_fuel = fuel_cg_z - cg_location
+        
+        I_xx = I_xx_dry + self.dry_mass * d_dry**2 + I_xx_fuel + fuel_remaining * d_fuel**2
+        I_yy = I_yy_dry + self.dry_mass * d_dry**2 + I_yy_fuel + fuel_remaining * d_fuel**2
+        I_zz = I_zz_dry + I_zz_fuel  # No parallel axis for rotation about z
+        
+        return np.diag([I_xx, I_yy, I_zz])
         
     def calculate_ignition_altitude(self, initial_velocity, initial_altitude):
         """
@@ -190,6 +274,14 @@ class SuicideBurnSimulation:
         # Rotation matrix (body to inertial)
         R_body_to_inertial = self.physics.quaternion_to_rotation_matrix(quaternion)
         
+        # Calculate dynamic CG and inertia if enabled
+        cg_location = self.calculate_dynamic_cg(mass)
+        current_inertia_tensor = self.calculate_dynamic_inertia(mass, cg_location)
+        
+        # CG offset from thrust point (accounting for dynamic CG)
+        # Thrust point is at bottom of rocket
+        cg_offset_from_thrust = np.array([0, 0, cg_location - self.fuel_tank_bottom])
+        
         # Forces in inertial frame
         # Gravity
         F_gravity = np.array([0, 0, -mass * self.physics.g])
@@ -207,9 +299,8 @@ class SuicideBurnSimulation:
         acceleration = F_total / mass if mass > 0 else np.zeros(3)
         
         # Moments in body frame
-        # Thrust moment from TVC
-        cg_offset = np.array([0, 0, -self.length/3])  # CG offset from thrust point
-        M_thrust = self.motor.get_thrust_moment(t, cg_offset)
+        # Thrust moment from TVC (using dynamic CG offset)
+        M_thrust = self.motor.get_thrust_moment(t, cg_offset_from_thrust)
         
         # Aerodynamic moment (simplified - stabilizing)
         omega_body = angular_velocity
@@ -219,9 +310,9 @@ class SuicideBurnSimulation:
         M_total = M_thrust + M_aero
         
         # Angular acceleration (Euler's equation: I*ω̇ + ω × (I*ω) = M)
-        I_omega = self.inertia_tensor @ angular_velocity
+        I_omega = current_inertia_tensor @ angular_velocity
         omega_cross_I_omega = np.cross(angular_velocity, I_omega)
-        angular_acceleration = np.linalg.solve(self.inertia_tensor, M_total - omega_cross_I_omega)
+        angular_acceleration = np.linalg.solve(current_inertia_tensor, M_total - omega_cross_I_omega)
         
         # Quaternion derivative
         # q̇ = 0.5 * q ⊗ [0, ω]
