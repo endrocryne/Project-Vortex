@@ -130,8 +130,12 @@ python cli.py --mode optimize --config my_config.json
     "burn_time": 3.0,
     "tvc_max_angle": 5.0,
     "tvc_response_time": 0.1,
-    "tvc_kp": 0.5,
-    "tvc_kd": 0.1
+    "tvc_kp_pitch": 0.5,
+    "tvc_ki_pitch": 0.05,
+    "tvc_kd_pitch": 0.1,
+    "tvc_kp_yaw": 0.5,
+    "tvc_ki_yaw": 0.05,
+    "tvc_kd_yaw": 0.1
   },
   "environment": {
     "gravity": 9.81,

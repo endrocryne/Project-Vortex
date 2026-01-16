@@ -128,16 +128,39 @@ class SolidMotor:
         if thrust_magnitude == 0:
             return np.zeros(3)
         
-        # Thrust vector in body frame (nominal thrust along +z axis)
+        # Nominal thrust direction in body frame (along +z axis before gimbal)
+        thrust_nominal = np.array([0, 0, 1])
+        
         # TVC angles: pitch (rotation about y), yaw (rotation about x)
         pitch, yaw = self.current_tvc_angle
         
-        # Thrust direction in body frame
-        thrust_body = np.array([
-            thrust_magnitude * np.sin(yaw),
-            thrust_magnitude * np.sin(pitch),
-            thrust_magnitude * np.cos(pitch) * np.cos(yaw)
+        # Build rotation matrices for TVC gimbal
+        # Rotation about Y-axis (pitch)
+        cos_pitch = np.cos(pitch)
+        sin_pitch = np.sin(pitch)
+        R_pitch = np.array([
+            [cos_pitch, 0, sin_pitch],
+            [0, 1, 0],
+            [-sin_pitch, 0, cos_pitch]
         ])
+        
+        # Rotation about X-axis (yaw)
+        cos_yaw = np.cos(yaw)
+        sin_yaw = np.sin(yaw)
+        R_yaw = np.array([
+            [1, 0, 0],
+            [0, cos_yaw, -sin_yaw],
+            [0, sin_yaw, cos_yaw]
+        ])
+        
+        # Combined TVC rotation: first pitch, then yaw
+        R_tvc = R_yaw @ R_pitch
+        
+        # Apply TVC rotation to nominal thrust direction
+        thrust_direction_body = R_tvc @ thrust_nominal
+        
+        # Scale by thrust magnitude
+        thrust_body = thrust_magnitude * thrust_direction_body
         
         # Transform to inertial frame
         thrust_inertial = body_to_inertial_matrix @ thrust_body
@@ -160,13 +183,39 @@ class SolidMotor:
         if thrust_magnitude == 0:
             return np.zeros(3)
         
-        # Thrust vector in body frame
+        # Nominal thrust direction in body frame (along +z axis before gimbal)
+        thrust_nominal = np.array([0, 0, 1])
+        
+        # TVC angles: pitch (rotation about y), yaw (rotation about x)
         pitch, yaw = self.current_tvc_angle
-        thrust_body = np.array([
-            thrust_magnitude * np.sin(yaw),
-            thrust_magnitude * np.sin(pitch),
-            thrust_magnitude * np.cos(pitch) * np.cos(yaw)
+        
+        # Build rotation matrices for TVC gimbal
+        # Rotation about Y-axis (pitch)
+        cos_pitch = np.cos(pitch)
+        sin_pitch = np.sin(pitch)
+        R_pitch = np.array([
+            [cos_pitch, 0, sin_pitch],
+            [0, 1, 0],
+            [-sin_pitch, 0, cos_pitch]
         ])
+        
+        # Rotation about X-axis (yaw)
+        cos_yaw = np.cos(yaw)
+        sin_yaw = np.sin(yaw)
+        R_yaw = np.array([
+            [1, 0, 0],
+            [0, cos_yaw, -sin_yaw],
+            [0, sin_yaw, cos_yaw]
+        ])
+        
+        # Combined TVC rotation: first pitch, then yaw
+        R_tvc = R_yaw @ R_pitch
+        
+        # Apply TVC rotation to nominal thrust direction
+        thrust_direction_body = R_tvc @ thrust_nominal
+        
+        # Scale by thrust magnitude
+        thrust_body = thrust_magnitude * thrust_direction_body
         
         # Moment = r × F
         moment = np.cross(cg_offset, thrust_body)

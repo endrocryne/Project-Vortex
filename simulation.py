@@ -51,9 +51,19 @@ class SuicideBurnSimulation:
         self.I_zz = (1/2) * self.initial_mass * r**2
         self.inertia_tensor = np.diag([self.I_xx, self.I_yy, self.I_zz])
         
-        # Control parameters
-        self.tvc_kp = rocket_config.get('tvc_kp', 0.5)
-        self.tvc_kd = rocket_config.get('tvc_kd', 0.1)
+        # Control parameters - PID gains for pitch (y-axis) and yaw (x-axis)
+        self.tvc_kp_pitch = rocket_config.get('tvc_kp_pitch', 0.5)
+        self.tvc_ki_pitch = rocket_config.get('tvc_ki_pitch', 0.05)
+        self.tvc_kd_pitch = rocket_config.get('tvc_kd_pitch', 0.1)
+        
+        self.tvc_kp_yaw = rocket_config.get('tvc_kp_yaw', 0.5)
+        self.tvc_ki_yaw = rocket_config.get('tvc_ki_yaw', 0.05)
+        self.tvc_kd_yaw = rocket_config.get('tvc_kd_yaw', 0.1)
+        
+        # Integral error accumulators
+        self.pitch_integral_error = 0.0
+        self.yaw_integral_error = 0.0
+        self.last_time = 0.0
         
         # Sensor accuracy (Monte Carlo)
         self.altimeter_error = simulation_config.get('altimeter_error', 0.0)
@@ -102,7 +112,8 @@ class SuicideBurnSimulation:
     
     def tvc_controller(self, state, time):
         """
-        TVC controller for attitude stabilization
+        TVC PID controller for attitude stabilization
+        Separate gains for pitch (y-axis) and yaw (x-axis)
         
         Args:
             state: current state vector
@@ -115,6 +126,11 @@ class SuicideBurnSimulation:
         qw, qx, qy, qz = state[6:10]
         omega_x, omega_y, omega_z = state[10:13]
         
+        # Calculate time step
+        dt = time - self.last_time if self.last_time > 0 else 0.01
+        dt = max(dt, 1e-6)  # Prevent division by zero
+        self.last_time = time
+        
         # Target: vertical orientation (pointing up)
         # Target quaternion: [1, 0, 0, 0]
         
@@ -123,9 +139,27 @@ class SuicideBurnSimulation:
         pitch_error = 2 * qy
         yaw_error = 2 * qx
         
-        # PD control
-        pitch_command = -self.tvc_kp * pitch_error - self.tvc_kd * omega_y
-        yaw_command = -self.tvc_kp * yaw_error - self.tvc_kd * omega_x
+        # Update integral terms (with anti-windup)
+        max_integral = 0.5  # Limit integral term to prevent windup
+        self.pitch_integral_error += pitch_error * dt
+        self.pitch_integral_error = np.clip(self.pitch_integral_error, -max_integral, max_integral)
+        
+        self.yaw_integral_error += yaw_error * dt
+        self.yaw_integral_error = np.clip(self.yaw_integral_error, -max_integral, max_integral)
+        
+        # PID control for pitch (y-axis motor)
+        pitch_command = (
+            -self.tvc_kp_pitch * pitch_error 
+            - self.tvc_ki_pitch * self.pitch_integral_error
+            - self.tvc_kd_pitch * omega_y
+        )
+        
+        # PID control for yaw (x-axis motor)
+        yaw_command = (
+            -self.tvc_kp_yaw * yaw_error 
+            - self.tvc_ki_yaw * self.yaw_integral_error
+            - self.tvc_kd_yaw * omega_x
+        )
         
         return pitch_command, yaw_command
     
@@ -258,8 +292,11 @@ class SuicideBurnSimulation:
             ignition_time = sol_freefall.t_events[0][0]
             state_at_ignition = sol_freefall.y_events[0][0]
             
-            # Ignite motor
+            # Ignite motor and reset PID integral terms
             self.motor.ignite(ignition_time)
+            self.pitch_integral_error = 0.0
+            self.yaw_integral_error = 0.0
+            self.last_time = ignition_time
             
             # Continue simulation with motor burning
             def burning_state_derivative(t, state):

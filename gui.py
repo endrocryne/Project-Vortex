@@ -111,13 +111,33 @@ class SimulationGUI:
         self.tvc_response_time = tk.DoubleVar(value=0.1)
         ttk.Entry(frame, textvariable=self.tvc_response_time).grid(row=1, column=1)
         
-        ttk.Label(frame, text="Kp (Proportional):").grid(row=2, column=0, sticky='w')
-        self.tvc_kp = tk.DoubleVar(value=0.5)
-        ttk.Entry(frame, textvariable=self.tvc_kp).grid(row=2, column=1)
+        ttk.Label(frame, text="--- Pitch Control (Y-axis) ---").grid(row=2, column=0, columnspan=2, pady=(10,5))
         
-        ttk.Label(frame, text="Kd (Derivative):").grid(row=3, column=0, sticky='w')
-        self.tvc_kd = tk.DoubleVar(value=0.1)
-        ttk.Entry(frame, textvariable=self.tvc_kd).grid(row=3, column=1)
+        ttk.Label(frame, text="Kp (Proportional):").grid(row=3, column=0, sticky='w')
+        self.tvc_kp_pitch = tk.DoubleVar(value=0.5)
+        ttk.Entry(frame, textvariable=self.tvc_kp_pitch).grid(row=3, column=1)
+        
+        ttk.Label(frame, text="Ki (Integral):").grid(row=4, column=0, sticky='w')
+        self.tvc_ki_pitch = tk.DoubleVar(value=0.05)
+        ttk.Entry(frame, textvariable=self.tvc_ki_pitch).grid(row=4, column=1)
+        
+        ttk.Label(frame, text="Kd (Derivative):").grid(row=5, column=0, sticky='w')
+        self.tvc_kd_pitch = tk.DoubleVar(value=0.1)
+        ttk.Entry(frame, textvariable=self.tvc_kd_pitch).grid(row=5, column=1)
+        
+        ttk.Label(frame, text="--- Yaw Control (X-axis) ---").grid(row=6, column=0, columnspan=2, pady=(10,5))
+        
+        ttk.Label(frame, text="Kp (Proportional):").grid(row=7, column=0, sticky='w')
+        self.tvc_kp_yaw = tk.DoubleVar(value=0.5)
+        ttk.Entry(frame, textvariable=self.tvc_kp_yaw).grid(row=7, column=1)
+        
+        ttk.Label(frame, text="Ki (Integral):").grid(row=8, column=0, sticky='w')
+        self.tvc_ki_yaw = tk.DoubleVar(value=0.05)
+        ttk.Entry(frame, textvariable=self.tvc_ki_yaw).grid(row=8, column=1)
+        
+        ttk.Label(frame, text="Kd (Derivative):").grid(row=9, column=0, sticky='w')
+        self.tvc_kd_yaw = tk.DoubleVar(value=0.1)
+        ttk.Entry(frame, textvariable=self.tvc_kd_yaw).grid(row=9, column=1)
         
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
@@ -303,8 +323,12 @@ class SimulationGUI:
             'burn_time': self.burn_time.get(),
             'tvc_max_angle': self.tvc_max_angle.get(),
             'tvc_response_time': self.tvc_response_time.get(),
-            'tvc_kp': self.tvc_kp.get(),
-            'tvc_kd': self.tvc_kd.get(),
+            'tvc_kp_pitch': self.tvc_kp_pitch.get(),
+            'tvc_ki_pitch': self.tvc_ki_pitch.get(),
+            'tvc_kd_pitch': self.tvc_kd_pitch.get(),
+            'tvc_kp_yaw': self.tvc_kp_yaw.get(),
+            'tvc_ki_yaw': self.tvc_ki_yaw.get(),
+            'tvc_kd_yaw': self.tvc_kd_yaw.get(),
             'thrust_variation': self.thrust_variation.get(),
             'tvc_response_variation': self.tvc_response_variation.get(),
             'mass_variation': self.mass_variation.get(),
