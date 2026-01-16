@@ -1,0 +1,32 @@
+{
+  "rocket": {
+    "dry_mass": 50.0,
+    "propellant_mass": 10.0,
+    "length": 5.0,
+    "diameter": 0.3,
+    "thrust_curve": [[0, 0], [0.1, 1000], [3.0, 1000], [3.1, 0]],
+    "burn_time": 3.0,
+    "tvc_max_angle": 5.0,
+    "tvc_response_time": 0.1,
+    "tvc_kp": 0.5,
+    "tvc_kd": 0.1,
+    "thrust_variation": 0.1,
+    "tvc_response_variation": 0.2,
+    "mass_variation": 0.05
+  },
+  "environment": {
+    "gravity": 9.81,
+    "air_density": 1.225,
+    "temperature": 288.15,
+    "drag_coefficient": 0.5,
+    "wind_model": "gusts",
+    "wind_speed": 10.0,
+    "wind_direction": 90.0,
+    "drag_variation": 0.15,
+    "air_density_variation": 0.1
+  },
+  "simulation": {
+    "altimeter_error": 0.02,
+    "velocity_sensor_error": 0.02
+  }
+}
