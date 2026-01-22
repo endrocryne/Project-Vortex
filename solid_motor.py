@@ -47,8 +47,12 @@ class SolidMotor:
         self.tvc_response_time = config.get('tvc_response_time', 0.1)
         self.tvc_response_variation = config.get('tvc_response_variation', 0.0)
         
-        # Monte Carlo thrust variation
+        # Monte Carlo variation factors (sampled once per motor instance)
         self.thrust_variation = config.get('thrust_variation', 0.0)
+        self.thrust_variation_factor = 1.0 + np.random.uniform(-self.thrust_variation, self.thrust_variation)
+        
+        mass_variation = config.get('mass_variation', 0.0)
+        self.mass_flow_variation_factor = 1.0 + np.random.uniform(-mass_variation, mass_variation)
         
         # Motor state
         self.ignited = False
@@ -78,21 +82,14 @@ class SolidMotor:
         time_since_ignition = time - self.ignition_time
         nominal_thrust = float(self.thrust_interp(time_since_ignition))
         
-        # Apply Monte Carlo variation
-        thrust_factor = 1.0 + np.random.uniform(-self.thrust_variation, self.thrust_variation)
-        
-        return nominal_thrust * thrust_factor
+        return nominal_thrust * self.thrust_variation_factor
     
     def get_mass_flow_rate(self, time):
         """Get mass flow rate at given time"""
         if not self.is_burning(time):
             return 0.0
         
-        # Add variation to mass flow rate
-        mass_variation = self.config.get('mass_variation', 0.0)
-        flow_factor = 1.0 + np.random.uniform(-mass_variation, mass_variation)
-        
-        return self.mass_flow_rate * flow_factor
+        return self.mass_flow_rate * self.mass_flow_variation_factor
     
     def set_tvc_command(self, pitch_angle, yaw_angle):
         """Set commanded TVC angle (radians)"""

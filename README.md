@@ -176,14 +176,14 @@ python cli.py --mode optimize --config my_config.json
 
 ### Output Files
 
-All results are saved to the `results/` directory with timestamps:
+Each run creates a timestamped subfolder inside `results/`, for example `results/optimization_YYYYMMDD_HHMMSS/`. The folder will contain:
 
-- `optimization_YYYYMMDD_HHMMSS.csv` - Success rate vs altitude data
-- `trajectory_YYYYMMDD_HHMMSS.csv` - Full trajectory state history
-- `single_run_YYYYMMDD_HHMMSS.csv` - Single simulation trajectory
-- `success_rate_YYYYMMDD_HHMMSS.png` - Success rate plot
-- `trajectory_2d_YYYYMMDD_HHMMSS.png` - 2D trajectory plots
-- `trajectory_3d_YYYYMMDD_HHMMSS.png` - 3D trajectory visualization
+- `optimization.csv` - Success rate vs altitude data
+- `trajectory.csv` - Full trajectory state history (best/representative run)
+- `single_run.csv` - Single simulation trajectory (for single-run mode)
+- `success_rate.png` - Success rate plot
+- `trajectory_2d.png` - 2D trajectory plots
+- `trajectory_3d.png` - 3D trajectory visualization
 
 ## Technical Details
 

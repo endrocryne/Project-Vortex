@@ -116,7 +116,7 @@ def run_single_simulation(config_file=None, sim_overrides=None):
     filename = f'results/single_run_{timestamp}.csv'
     with open(filename, 'w', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow(['Time', 'X', 'Y', 'Z', 'VX', 'VY', 'VZ', 'Mass'])
+        writer.writerow(['Time', 'X', 'Y', 'Z', 'VX', 'VY', 'VZ', 'QW', 'QX', 'QY', 'QZ', 'Mass'])
         for i in range(len(history['t'])):
             writer.writerow([
                 history['t'][i],
@@ -126,6 +126,10 @@ def run_single_simulation(config_file=None, sim_overrides=None):
                 history['vx'][i],
                 history['vy'][i],
                 history['vz'][i],
+                history['qw'][i],
+                history['qx'][i],
+                history['qy'][i],
+                history['qz'][i],
                 history['mass'][i]
             ])
     

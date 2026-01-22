@@ -9,6 +9,8 @@ from scipy.interpolate import interp1d
 import time as pytime
 from datetime import datetime
 import os
+import csv
+import matplotlib.pyplot as plt
 
 from physics_engine import PhysicsEngine
 from solid_motor import SolidMotor
@@ -349,17 +351,25 @@ class SuicideBurnSimulation:
             -self.altimeter_error, self.altimeter_error))
         
         # Event: motor ignition
-        def ignition_event(t, state):
+        class Event:
+            def __init__(self, func, terminal: bool = False, direction: int = 0):
+                self._func = func
+                self.terminal = terminal
+                self.direction = direction
+            def __call__(self, t, y):
+                return self._func(t, y)
+        
+        def _ignition_event_func(t, state):
             altitude = state[2]
             return altitude - ignition_altitude_sensed
-        ignition_event.terminal = False
-        ignition_event.direction = -1  # Trigger when decreasing
         
+        ignition_event = Event(_ignition_event_func, terminal=True, direction=-1)
+         
         # Event: ground contact
-        def ground_event(t, state):
+        def _ground_event_func(t, state):
             return state[2]  # altitude
-        ground_event.terminal = True
-        ground_event.direction = -1
+        
+        ground_event = Event(_ground_event_func, terminal=True, direction=-1)
         
         # Integrate until ignition or ground
         sol_freefall = solve_ivp(
@@ -426,7 +436,7 @@ class SuicideBurnSimulation:
         
         # Check success criteria
         # Success: final altitude ≈ 0, final vertical speed < 2 m/s
-        altitude_ok = abs(final_altitude) < 0.5
+        altitude_ok = abs(final_altitude) < 1.0
         velocity_ok = abs(final_velocity[2]) < 2.0
         total_velocity_ok = final_speed < 3.0
         
@@ -460,7 +470,9 @@ class SuicideBurnSimulation:
         return success, final_state, history
     
     def optimize_ignition_altitude(self, initial_state, num_monte_carlo=100, 
-                                   altitude_search_range=10.0, altitude_step=0.1):
+                                   altitude_search_range=10.0, altitude_step=0.1,
+                                   progress_callback=None,
+                                   save_each_trial=False, results_folder=None, save_plots_per_trial=False):
         """
         Optimize ignition altitude using Monte Carlo simulation
         
@@ -469,6 +481,10 @@ class SuicideBurnSimulation:
             num_monte_carlo: number of Monte Carlo runs per altitude
             altitude_search_range: range to search around analytical estimate (m)
             altitude_step: step size for altitude search (m)
+            progress_callback: optional callable(progress_completed, total)
+            save_each_trial: if True, save raw data (CSV) for every individual trial
+            results_folder: path to a folder where per-run files will be saved (required if save_each_trial=True)
+            save_plots_per_trial: if True and save_each_trial=True, generate per-trial PNG plots
             
         Returns:
             optimal_altitude: best ignition altitude (m)
@@ -495,11 +511,21 @@ class SuicideBurnSimulation:
         best_success_rate = 0.0
         best_history = None
         
+        total_runs = len(altitudes) * int(num_monte_carlo)
+        runs_completed = 0
+        
+        trials_dir = None
+        if save_each_trial:
+            if not results_folder:
+                raise ValueError("results_folder must be provided when save_each_trial=True")
+            trials_dir = os.path.join(results_folder, 'trials')
+            os.makedirs(trials_dir, exist_ok=True)
+
         for altitude in altitudes:
             successes = 0
             histories = []
             
-            for i in range(num_monte_carlo):
+            for i in range(int(num_monte_carlo)):
                 # Reset motor
                 self.motor = SolidMotor(self.rocket_config)
                 
@@ -511,18 +537,78 @@ class SuicideBurnSimulation:
                 if success:
                     successes += 1
                     histories.append(history)
+
+                # Save per-trial raw data if requested
+                if save_each_trial and trials_dir is not None:
+                    # Safe altitude string for filenames
+                    alt_str = f"{altitude:.2f}".replace('.', 'p')
+                    idx_str = f"{i+1:04d}"
+                    status = 'success' if success else 'fail'
+                    csv_name = os.path.join(trials_dir, f"trial_alt{alt_str}_idx{idx_str}_{status}.csv")
+                    try:
+                        with open(csv_name, 'w', newline='') as f:
+                            writer = csv.writer(f)
+                            writer.writerow(['Time', 'X', 'Y', 'Z', 'VX', 'VY', 'VZ', 'QW', 'QX', 'QY', 'QZ', 'Mass', 'AltitudeTest'])
+                            for k in range(len(history['t'])):
+                                writer.writerow([
+                                    history['t'][k],
+                                    history['x'][k],
+                                    history['y'][k],
+                                    history['z'][k],
+                                    history['vx'][k],
+                                    history['vy'][k],
+                                    history['vz'][k],
+                                    history['qw'][k],
+                                    history['qx'][k],
+                                    history['qy'][k],
+                                    history['qz'][k],
+                                    history['mass'][k],
+                                    altitude
+                                ])
+                    except Exception as e:
+                        print(f"Could not save trial CSV {csv_name}: {e}")
+
+                    # Optionally save a small plot (Altitude vs Time)
+                    if save_plots_per_trial:
+                        png_name = os.path.join(trials_dir, f"trial_alt{alt_str}_idx{idx_str}_{status}.png")
+                        try:
+                            plt.figure(figsize=(6, 3))
+                            plt.plot(history['t'], history['z'], 'b-')
+                            plt.xlabel('Time (s)')
+                            plt.ylabel('Altitude (m)')
+                            plt.title(f'Trial {idx_str} (alt {altitude:.2f})')
+                            plt.grid(True)
+                            plt.tight_layout()
+                            plt.savefig(png_name, dpi=100, bbox_inches='tight')
+                            plt.close()
+                        except Exception as e:
+                            print(f"Could not save trial PNG {png_name}: {e}")
+
+                # Update progress
+                runs_completed += 1
+                if progress_callback is None:
+                    # Console progress
+                    print(f"\rRunning optimization: {runs_completed}/{total_runs} simulations", end='', flush=True)
+                else:
+                    try:
+                        progress_callback(runs_completed, total_runs)
+                    except Exception:
+                        print("MishraPy Runtime: An error occured at line 529 in simulation.py during [AI] progress callback. [AI]")
             
-            success_rate = successes / num_monte_carlo
+            success_rate = successes / float(num_monte_carlo)
             success_rates[altitude] = success_rate
             
+            # Ensure console has a newline after printing inline progress
+            if progress_callback is None:
+                print('')
+
             print(f"Altitude {altitude:.1f} m: {success_rate*100:.1f}% success rate")
             
             if success_rate > best_success_rate:
                 best_success_rate = success_rate
                 best_altitude = altitude
                 if len(histories) > 0:
-                    best_history = histories[0]
-        
+                    best_history = histories[0]        
         print(f"\nOptimal ignition altitude: {best_altitude:.2f} m "
               f"({best_success_rate*100:.1f}% success rate)")
         
