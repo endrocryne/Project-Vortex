@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Timer App</title>
+    <link rel="stylesheet" href="../../framework.css">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <style>
+        /* Custom styles for timer app */
+        .timer-display {
+            font-size: 4rem;
+            font-weight: bold;
+            text-align: center;
+            margin: 2rem 0;
+            font-family: 'Courier New', monospace;
+        }
+
+        .timer-controls {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .timer-controls button {
+            min-width: 120px;
+        }
+
+        .preset-buttons {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 1rem;
+            margin-top: 2rem;
+        }
+
+        .history-list {
+            margin-top: 2rem;
+        }
+
+        .history-item {
+            padding: 1rem;
+            margin-bottom: 0.5rem;
+            background-color: var(--surface);
+            border-radius: var(--border-radius);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .stopwatch-display {
+            font-size: 3rem;
+            font-weight: bold;
+            text-align: center;
+            margin: 2rem 0;
+            font-family: 'Courier New', monospace;
+        }
+
+        .lap-times {
+            max-height: 300px;
+            overflow-y: auto;
+            margin-top: 1rem;
+        }
+
+        .lap-item {
+            padding: 0.5rem;
+            border-bottom: 1px solid var(--shadow);
+            display: flex;
+            justify-content: space-between;
+        }
+    </style>
+</head>
+<body class="liquid-glass" data-theme="light">
+    <!-- Header -->
+    <div class="header">
+        <div class="title">Simple Timer</div>
+        <div class="controls">
+            <button id="settingsBtn">⚙️ Settings</button>
+        </div>
+    </div>
+
+    <!-- Tab Navigation -->
+    <div class="tabs">
+        <button class="tab-link active" onclick="openTab(event, 'timer')">
+            <i class="material-icons">timer</i> Timer
+        </button>
+        <button class="tab-link" onclick="openTab(event, 'stopwatch')">
+            <i class="material-icons">av_timer</i> Stopwatch
+        </button>
+        <button class="tab-link" onclick="openTab(event, 'history')">
+            <i class="material-icons">history</i> History
+        </button>
+    </div>
+
+    <!-- Timer Tab -->
+    <div id="timer" class="tab-content" style="display: block;">
+        <h2>Countdown Timer</h2>
+        
+        <div class="timer-display" id="timerDisplay">00:00:00</div>
+        
+        <div class="form-group">
+            <label for="timerInput">Set Time (minutes):</label>
+            <input type="number" id="timerInput" min="1" max="1440" value="5" placeholder="Minutes">
+        </div>
+
+        <div class="timer-controls">
+            <button id="startTimer">
+                <i class="material-icons">play_arrow</i> Start
+            </button>
+            <button id="pauseTimer">
+                <i class="material-icons">pause</i> Pause
+            </button>
+            <button id="resetTimer">
+                <i class="material-icons">refresh</i> Reset
+            </button>
+        </div>
+
+        <div class="preset-buttons">
+            <button onclick="setTimerPreset(1)">1 Minute</button>
+            <button onclick="setTimerPreset(5)">5 Minutes</button>
+            <button onclick="setTimerPreset(10)">10 Minutes</button>
+            <button onclick="setTimerPreset(15)">15 Minutes</button>
+            <button onclick="setTimerPreset(25)">25 Minutes (Pomodoro)</button>
+            <button onclick="setTimerPreset(30)">30 Minutes</button>
+        </div>
+    </div>
+
+    <!-- Stopwatch Tab -->
+    <div id="stopwatch" class="tab-content">
+        <h2>Stopwatch</h2>
+        
+        <div class="stopwatch-display" id="stopwatchDisplay">00:00:00</div>
+        
+        <div class="timer-controls">
+            <button id="startStopwatch">
+                <i class="material-icons">play_arrow</i> Start
+            </button>
+            <button id="lapStopwatch">
+                <i class="material-icons">flag</i> Lap
+            </button>
+            <button id="resetStopwatch">
+                <i class="material-icons">refresh</i> Reset
+            </button>
+        </div>
+
+        <div class="lap-times" id="lapTimes"></div>
+    </div>
+
+    <!-- History Tab -->
+    <div id="history" class="tab-content">
+        <h2>Timer History</h2>
+        <div class="history-list" id="historyList">
+            <p>No history yet. Start using the timer!</p>
+        </div>
+        <button onclick="clearHistory()">Clear History</button>
+    </div>
+
+    <!-- Settings Modal -->
+    <div class="modal" id="settingsModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title">Settings</div>
+                <button class="close-btn" id="closeSettings">&times;</button>
+            </div>
+
+            <div class="form-group">
+                <label for="themeSelect">Theme:</label>
+                <select id="themeSelect">
+                    <option value="light">Light</option>
+                    <option value="dark">Dark</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="styleSelect">Style:</label>
+                <select id="styleSelect">
+                    <option value="material3">Google Material 3</option>
+                    <option value="fluent">Microsoft Fluent Design</option>
+                    <option value="liquid-glass">Liquid Glass</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="accentColorInput">Accent Color:</label>
+                <input type="color" id="accentColorInput">
+            </div>
+
+            <div class="form-group">
+                <label for="fontSizeSlider">Font Size:</label>
+                <input type="range" id="fontSizeSlider" min="12" max="24" value="16">
+            </div>
+
+            <div class="form-group toggle-group">
+                <label for="highContrastToggle">High Contrast:</label>
+                <label class="switch">
+                    <input type="checkbox" id="highContrastToggle">
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <div class="form-group toggle-group">
+                <label for="soundToggle">Sound Notifications:</label>
+                <label class="switch">
+                    <input type="checkbox" id="soundToggle" checked>
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <button id="saveSettings">Save Settings</button>
+        </div>
+    </div>
+
+    <!-- Framework Scripts -->
+    <script src="../../framework.js"></script>
+    <script src="../../customizer.js"></script>
+    <script>
+        // Initialize the framework
+        const app = new UIFramework({
+            appName: 'Simple Timer',
+            defaultTheme: 'light',
+            defaultStyle: 'liquid-glass'
+        });
+
+        // Timer App Logic
+        class TimerApp {
+            constructor() {
+                this.timerInterval = null;
+                this.timerSeconds = 0;
+                this.timerRunning = false;
+                
+                this.stopwatchInterval = null;
+                this.stopwatchSeconds = 0;
+                this.stopwatchRunning = false;
+                this.lapCounter = 0;
+                
+                this.history = JSON.parse(localStorage.getItem('timerHistory') || '[]');
+                
+                this.initializeElements();
+                this.attachEventListeners();
+                this.loadHistory();
+            }
+
+            initializeElements() {
+                this.timerDisplay = document.getElementById('timerDisplay');
+                this.timerInput = document.getElementById('timerInput');
+                this.startTimerBtn = document.getElementById('startTimer');
+                this.pauseTimerBtn = document.getElementById('pauseTimer');
+                this.resetTimerBtn = document.getElementById('resetTimer');
+                
+                this.stopwatchDisplay = document.getElementById('stopwatchDisplay');
+                this.startStopwatchBtn = document.getElementById('startStopwatch');
+                this.lapStopwatchBtn = document.getElementById('lapStopwatch');
+                this.resetStopwatchBtn = document.getElementById('resetStopwatch');
+                this.lapTimesDiv = document.getElementById('lapTimes');
+                
+                this.historyListDiv = document.getElementById('historyList');
+            }
+
+            attachEventListeners() {
+                this.startTimerBtn.addEventListener('click', () => this.startTimer());
+                this.pauseTimerBtn.addEventListener('click', () => this.pauseTimer());
+                this.resetTimerBtn.addEventListener('click', () => this.resetTimer());
+                
+                this.startStopwatchBtn.addEventListener('click', () => this.toggleStopwatch());
+                this.lapStopwatchBtn.addEventListener('click', () => this.recordLap());
+                this.resetStopwatchBtn.addEventListener('click', () => this.resetStopwatch());
+            }
+
+            formatTime(seconds) {
+                const hours = Math.floor(seconds / 3600);
+                const minutes = Math.floor((seconds % 3600) / 60);
+                const secs = seconds % 60;
+                return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+            }
+
+            startTimer() {
+                if (this.timerRunning) return;
+                
+                if (this.timerSeconds === 0) {
+                    this.timerSeconds = parseInt(this.timerInput.value) * 60;
+                }
+                
+                this.timerRunning = true;
+                this.timerInterval = setInterval(() => {
+                    if (this.timerSeconds > 0) {
+                        this.timerSeconds--;
+                        this.timerDisplay.textContent = this.formatTime(this.timerSeconds);
+                    } else {
+                        this.timerComplete();
+                    }
+                }, 1000);
+            }
+
+            pauseTimer() {
+                this.timerRunning = false;
+                clearInterval(this.timerInterval);
+            }
+
+            resetTimer() {
+                this.timerRunning = false;
+                clearInterval(this.timerInterval);
+                this.timerSeconds = 0;
+                this.timerDisplay.textContent = '00:00:00';
+            }
+
+            timerComplete() {
+                this.resetTimer();
+                this.playSound();
+                alert('Timer Complete!');
+                this.addToHistory(`Timer: ${this.timerInput.value} minutes`);
+            }
+
+            toggleStopwatch() {
+                if (this.stopwatchRunning) {
+                    this.stopwatchRunning = false;
+                    clearInterval(this.stopwatchInterval);
+                    this.startStopwatchBtn.innerHTML = '<i class="material-icons">play_arrow</i> Start';
+                } else {
+                    this.stopwatchRunning = true;
+                    this.startStopwatchBtn.innerHTML = '<i class="material-icons">pause</i> Stop';
+                    this.stopwatchInterval = setInterval(() => {
+                        this.stopwatchSeconds++;
+                        this.stopwatchDisplay.textContent = this.formatTime(this.stopwatchSeconds);
+                    }, 1000);
+                }
+            }
+
+            recordLap() {
+                if (!this.stopwatchRunning) return;
+                
+                this.lapCounter++;
+                const lapDiv = document.createElement('div');
+                lapDiv.className = 'lap-item';
+                lapDiv.innerHTML = `
+                    <span>Lap ${this.lapCounter}</span>
+                    <span>${this.formatTime(this.stopwatchSeconds)}</span>
+                `;
+                this.lapTimesDiv.insertBefore(lapDiv, this.lapTimesDiv.firstChild);
+            }
+
+            resetStopwatch() {
+                this.stopwatchRunning = false;
+                clearInterval(this.stopwatchInterval);
+                this.stopwatchSeconds = 0;
+                this.lapCounter = 0;
+                this.stopwatchDisplay.textContent = '00:00:00';
+                this.lapTimesDiv.innerHTML = '';
+                this.startStopwatchBtn.innerHTML = '<i class="material-icons">play_arrow</i> Start';
+            }
+
+            playSound() {
+                const soundEnabled = document.getElementById('soundToggle')?.checked !== false;
+                if (soundEnabled && 'speechSynthesis' in window) {
+                    const utterance = new SpeechSynthesisUtterance('Timer complete');
+                    speechSynthesis.speak(utterance);
+                }
+            }
+
+            addToHistory(entry) {
+                const historyEntry = {
+                    entry,
+                    timestamp: new Date().toLocaleString()
+                };
+                this.history.unshift(historyEntry);
+                if (this.history.length > 50) this.history.pop();
+                localStorage.setItem('timerHistory', JSON.stringify(this.history));
+                this.loadHistory();
+            }
+
+            loadHistory() {
+                if (this.history.length === 0) {
+                    this.historyListDiv.innerHTML = '<p>No history yet. Start using the timer!</p>';
+                    return;
+                }
+                
+                this.historyListDiv.innerHTML = '';
+                this.history.forEach(item => {
+                    const div = document.createElement('div');
+                    div.className = 'history-item';
+                    div.innerHTML = `
+                        <span>${item.entry}</span>
+                        <small>${item.timestamp}</small>
+                    `;
+                    this.historyListDiv.appendChild(div);
+                });
+            }
+        }
+
+        // Global functions
+        window.setTimerPreset = function(minutes) {
+            document.getElementById('timerInput').value = minutes;
+        };
+
+        window.clearHistory = function() {
+            if (confirm('Clear all history?')) {
+                localStorage.removeItem('timerHistory');
+                timerApp.history = [];
+                timerApp.loadHistory();
+            }
+        };
+
+        // Initialize timer app
+        const timerApp = new TimerApp();
+    </script>
+</body>
+</html>

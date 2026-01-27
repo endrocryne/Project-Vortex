@@ -1,0 +1,784 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vortex Mission Control (MWUI)</title>
+
+    <!-- MWUI Framework -->
+    <link rel="stylesheet" href="mwui-framework/framework.css">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <!-- Custom Styles (kept from original, adapted for MWUI) -->
+    <style>
+        :root {
+            --primary-color: #007aff;
+            --danger-color: #dc3545;
+        }
+
+        /* Keep some original look & grid layout but rely on MWUI for base styling */
+        .grid-container {
+            display: grid;
+            gap: 16px;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        }
+
+        .card {
+            background-color: var(--card-bg, #fff);
+            border-radius: 8px;
+            padding: 16px;
+            border: 1px solid var(--border-color, #e6e9ee);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .card h2 { margin: 0 0 16px 0; font-size: 1.1rem; color: var(--muted, #6c757d); border-bottom: 1px solid var(--border-color, #e6e9ee); padding-bottom: 8px; }
+        .full-width { grid-column: 1 / -1; }
+        .data-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; }
+        .data-item { display: flex; justify-content: space-between; font-size: 0.95rem; }
+        .data-item .label { color: var(--muted, #6c757d); }
+        .data-item .value { font-weight: 600; color: var(--text-color, #212529); }
+        .chart-container { position: relative; flex-grow: 1; min-height: 220px; }
+        .log-area { height: 150px; background-color: #e9ecef; border: 1px solid var(--border-color, #e6e9ee); border-radius: 4px; padding: 8px; overflow-y: auto; font-family: monospace; font-size: 0.85rem; white-space: pre-wrap; }
+        .status-dot { width: 12px; height: 12px; border-radius: 50%; background-color: var(--danger-color); display:inline-block; margin-left:8px; vertical-align: middle; }
+        .status-dot.connected { background-color: #28a745; }
+
+        /* Keep original buttons look via MWUI classes but ensure spacing */
+        .controls { display:flex; align-items:center; gap:12px; }
+
+        /* Small helpers for tab compatibility */
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
+
+        /* Use MWUI framework modal styles (class 'modal') */
+        /* MWUI provides the .modal class with proper display behavior. */
+
+    </style>
+</head>
+<body class="liquid-glass" data-theme="light">
+
+    <!-- Header (MWUI) -->
+    <div class="header">
+        <div class="title">Vortex Mission Control</div>
+        <div class="controls">
+            <button id="settingsBtn" class="btn">⚙️</button>
+            <div class="connection-status">
+                <span id="connection-text">Disconnected</span>
+                <div id="status-dot" class="status-dot"></div>
+                <button id="connect-button" class="btn btn-primary">Connect</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tab Navigation (MWUI tabs with compatibility class `tab-button`) -->
+    <div class="tabs">
+        <button class="tab-link tab-button active" data-target="flight-info-panel"> <i class="material-icons">airplanemode_active</i> Flight Info</button>
+        <button class="tab-link tab-button" data-target="controls-panel"> <i class="material-icons">tune</i> Controls</button>
+        <button class="tab-link tab-button" data-target="config-panel"> <i class="material-icons">settings</i> Configuration</button>
+    </div>
+
+    <!-- Main Content -->
+    <main style="padding:24px;">
+        <!-- Flight Info -->
+        <div id="flight-info-panel" class="tab-panel active">
+            <div class="grid-container">
+                <div class="card full-width" style="min-height: 300px;">
+                    <h2>Altitude (m)</h2>
+                    <div class="chart-container">
+                        <canvas id="altitude-chart"></canvas>
+                    </div>
+                </div>
+                <div class="card full-width" style="min-height: 300px;">
+                    <h2>Velocity (m/s)</h2>
+                    <div class="chart-container">
+                         <canvas id="velocity-chart"></canvas>
+                    </div>
+                </div>
+                <div class="card full-width" style="min-height: 300px;">
+                    <h2>Orientation (°)</h2>
+                    <div class="chart-container">
+                         <canvas id="orientation-chart"></canvas>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2>Key Metrics</h2>
+                    <div class="data-grid">
+                        <div class="data-item"><span class="label">Altitude:</span> <span class="value" id="val-altitude">0.00 m</span></div>
+                        <div class="data-item"><span class="label">Velocity:</span> <span class="value" id="val-velocity">0.00 m/s</span></div>
+                        <div class="data-item"><span class="label">Acceleration:</span> <span class="value" id="val-acceleration">0.00 m/s²</span></div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2>Attitude</h2>
+                    <div class="data-grid">
+                        <div class="data-item"><span class="label">Pitch:</span> <span class="value" id="val-pitch">0.0°</span></div>
+                        <div class="data-item"><span class="label">Yaw:</span> <span class="value" id="val-yaw">0.0°</span></div>
+                        <div class="data-item"><span class="label">Roll:</span> <span class="value" id="val-roll">0.0°</span></div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2>Timers</h2>
+                    <div class="data-grid">
+                        <div class="data-item"><span class="label">Time Since Launch:</span> <span class="value" id="val-tsl">0s</span></div>
+                        <div class="data-item"><span class="label">ETA Apogee:</span> <span class="value" id="val-eta-apogee">N/A</span></div>
+                        <div class="data-item"><span class="label">ETA Landing:</span> <span class="value" id="val-eta-landing">N/A</span></div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2>Rocket State</h2>
+                     <div class="data-grid">
+                        <div class="data-item"><span class="label">Flight State:</span> <span class="value" id="val-flight-state">PRE-LAUNCH</span></div>
+                        <div class="data-item"><span class="label">Arm Status:</span> <span class="value" id="val-arm-status">DISARMED</span></div>
+                        <div class="data-item"><span class="label">Pyro Status:</span> <span class="value" id="val-pyro-status">---</span></div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2>Power</h2>
+                    <div class="data-grid">
+                        <div class="data-item"><span class="label">Voltage:</span> <span class="value" id="val-voltage">0.00 V</span></div>
+                        <div class="data-item"><span class="label">Current:</span> <span class="value" id="val-current">0 mA</span></div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2>LoRa Link</h2>
+                    <div class="data-grid">
+                        <div class="data-item"><span class="label">RSSI:</span> <span class="value" id="val-rssi">0 dBm</span></div>
+                        <div class="data-item"><span class="label">SNR:</span> <span class="value" id="val-snr">0.0 dB</span></div>
+                    </div>
+                </div>
+
+                <div class="card full-width">
+                    <h2>Warnings & Alerts Log</h2>
+                    <div id="alerts-log" class="log-area"></div>
+                </div>
+
+                <div class="card full-width">
+                    <h2>Data Replay</h2>
+                    <div class="config-row">
+                        <input type="file" id="replay-file-input" accept=".csv" class="hidden">
+                        <button id="load-replay-button" class="btn btn-secondary">Load CSV Log</button>
+                        <button id="start-replay-button" class="btn btn-primary" disabled>Start Replay</button>
+                        <button id="export-csv-button" class="btn btn-secondary">Export Log as CSV</button>
+                    </div>
+                </div>
+
+                <div class="card full-width">
+                    <h2>Raw VortexLink Stream</h2>
+                    <div id="serial-stream-log" class="log-area"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Controls -->
+        <div id="controls-panel" class="tab-panel">
+             <div class="controls-grid">
+                <button id="cmd-arm" class="btn btn-primary">ARM</button>
+                <button id="cmd-launch" class="btn btn-primary">LAUNCH</button>
+                <button id="cmd-abort" class="btn btn-danger">ABORT</button>
+                <button id="cmd-reboot" class="btn btn-secondary">Reboot FC</button>
+                <button id="cmd-enable-beacon" class="btn btn-secondary">Enable Beacon</button>
+                <button id="cmd-calibrate" class="btn btn-secondary">Initiate Calibration</button>
+             </div>
+            <div class="card full-width">
+                 <h2>State Override</h2>
+                 <div class="config-row">
+                     <select id="sel-force-state">
+                         <option value="0">INITIALIZING</option>
+                         <option value="1">PRE_FLIGHT_CHECKS</option>
+                         <option value="2">ARMED</option>
+                         <option value="5">ASCENT_TVC</option>
+                         <option value="6">COAST</option>
+                         <option value="8">DESCENT</option>
+                         <option value="9">TOUCHDOWN</option>
+                         <option value="10">RECOVERY_MODE</option>
+                     </select>
+                     <button id="btn-force-state" class="btn btn-danger">Force State</button>
+                 </div>
+            </div>
+        </div>
+
+        <!-- Configuration -->
+        <div id="config-panel" class="tab-panel">
+            <div class="card full-width config-section">
+                <div class="form-group">
+                    <label for="mode-selector">Operating Mode</label>
+                    <select id="mode-selector">
+                        <option value="flight" selected>Flight</option>
+                        <option value="static_fire">Static Fire</option>
+                        <option value="ground_test">Ground Test</option>
+                        <option value="simulation">Simulation</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="card full-width config-section">
+                <h2>TVC PID Gains</h2>
+                <div class="config-row">
+                    <div class="form-group">
+                        <label for="pid-p">P Gain</label>
+                        <input type="number" id="pid-p" value="2.0" step="0.1">
+                    </div>
+                    <div class="form-group">
+                        <label for="pid-i">I Gain</label>
+                        <input type="number" id="pid-i" value="0.5" step="0.1">
+                    </div>
+                    <div class="form-group">
+                        <label for="pid-d">D Gain</label>
+                        <input type="number" id="pid-d" value="0.2" step="0.1">
+                    </div>
+                    <button id="send-pids-button" class="btn btn-primary">Upload PID Gains</button>
+                </div>
+                <h2>Servo Configuration</h2>
+                <div class="config-row">
+                    <div class="form-group"><label>Pitch Center (us)</label><input type="number" id="servo-pitch-center" value="1500"></div>
+                    <div class="form-group"><label>Yaw Center (us)</label><input type="number" id="servo-yaw-center" value="1500"></div>
+                    <div class="form-group"><label>Max Angle (deg)</label><input type="number" id="servo-max-angle" value="20"></div>
+                    <button id="send-servo-config" class="btn btn-primary">Update Servos</button>
+                </div>
+            </div>
+
+            <div class="card full-width config-section">
+                <h2>System Rates</h2>
+                <div class="config-row">
+                    <div class="form-group"><label>TVC Rate (Hz)</label><input type="number" id="rate-tvc" value="100"></div>
+                    <div class="form-group"><label>Estimation Rate (Hz)</label><input type="number" id="rate-est" value="50"></div>
+                    <button id="send-rates-config" class="btn btn-primary">Update Rates</button>
+                </div>
+            </div>
+
+            <div class="card full-width config-section">
+                <h2>Kalman Filter</h2>
+                <div class="config-row">
+                    <div class="form-group"><label>Sigma Accel</label><input type="number" id="kalman-sigma" value="0.5" step="0.1"></div>
+                    <div class="form-group"><label>R Altitude</label><input type="number" id="kalman-r" value="10.0" step="1.0"></div>
+                    <button id="send-kalman-config" class="btn btn-primary">Update Kalman</button>
+                </div>
+            </div>
+
+            <div class="card full-width config-section">
+                <h2>Safety & System Flags</h2>
+                <div class="config-row">
+                    <div class="form-group">
+                         <label><input type="checkbox" id="chk-force-fail" checked> Force Continue on Fail</label>
+                    </div>
+                    <div class="form-group">
+                         <label><input type="checkbox" id="chk-serial-telem"> Enable Serial Telemetry</label>
+                    </div>
+                    <div class="form-group"><label>Min Batt Voltage</label><input type="number" id="min-batt-volt" value="7.0" step="0.1"></div>
+                    <button id="send-flags-config" class="btn btn-primary">Update Flags</button>
+                </div>
+            </div>
+
+            <div class="card full-width config-section">
+                <h2>Live Control Parameters</h2>
+                <div class="config-row">
+                    <div class="form-group"><label>Setpoint Pitch</label><input type="number" id="sp-pitch" value="0.0" step="0.1"></div>
+                    <div class="form-group"><label>Setpoint Yaw</label><input type="number" id="sp-yaw" value="0.0" step="0.1"></div>
+                    <button id="send-setpoints" class="btn btn-primary">Set Targets</button>
+                </div>
+                <div class="config-row" style="margin-top:10px;">
+                    <div class="form-group"><label>Pitch Integral</label><input type="number" id="int-pitch" value="0.0" step="0.1"></div>
+                    <div class="form-group"><label>Yaw Integral</label><input type="number" id="int-yaw" value="0.0" step="0.1"></div>
+                    <button id="send-integrals" class="btn btn-primary">Set Integrals</button>
+                </div>
+            </div>
+
+            <div class="card full-width config-section">
+                <h2>Telemetry & LoRa</h2>
+                 <div class="config-row">
+                    <div class="form-group">
+                        <label for="telemetry-rate">Telemetry Rate (Hz)</label>
+                        <input type="number" id="telemetry-rate" value="10">
+                    </div>
+                    <button id="send-telemetry-rate-button" class="btn btn-primary">Set Rate</button>
+                    <div class="form-group">
+                        <label for="lora-power">LoRa Power (dBm)</label>
+                        <input type="number" id="lora-power" value="20">
+                    </div>
+                    <button id="send-lora-power-button" class="btn btn-primary">Set Power</button>
+                 </div>
+            </div>
+
+            <div id="simulation-params-card" class="card full-width config-section hidden">
+                <h2>Simulation Parameters</h2>
+                <div class="config-row">
+                    <div class="form-group">
+                        <label>Rocket Mass (kg)</label>
+                        <input type="number" value="1.5">
+                    </div>
+                    <div class="form-group">
+                        <label>Drag Coefficient</label>
+                        <input type="number" value="0.75">
+                    </div>
+                    <div class="form-group">
+                        <label>Wind Speed (m/s)</label>
+                        <input type="number" value="2.0">
+                    </div>
+                </div>
+                <button id="run-simulation-button" class="btn btn-primary">Run Monte Carlo Simulation</button>
+            </div>
+
+            <div class="card full-width config-section">
+                <h2>Data Management</h2>
+                <div class="config-row">
+                    <button id="import-config-button" class="btn btn-secondary">Import Config (JSON)</button>
+                    <button id="export-config-button" class="btn btn-secondary">Export Config (JSON)</button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Dialogs (compatibility: keep ids used by JS) -->
+    <div id="confirmation-dialog" class="modal">
+        <div class="modal-content">
+            <h2 id="confirmation-dialog-title">Confirm Action</h2>
+            <p id="confirmation-dialog-content">Are you sure you want to proceed?</p>
+            <div class="modal-actions">
+                <button id="dialog-cancel-btn" class="btn btn-secondary">Cancel</button>
+                <button id="dialog-confirm-btn" class="btn btn-primary">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="simulation-placeholder-dialog" class="modal">
+        <div class="modal-content">
+            <h2>Simulation Engine</h2>
+            <p>The simulation engine is not yet implemented. This is a placeholder for the user interface.</p>
+            <div class="modal-actions">
+                <button id="sim-dialog-ok-btn" class="btn btn-primary">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="connect-dialog" class="modal">
+        <div class="modal-content">
+            <h2>Connect VortexLink Ground Station</h2>
+            <p id="connect-dialog-body">On the next screen you will see a list of all devices connected to your computer. Ensure your VortexLink Ground Station has a clear view of your rocket and is properly connected to your computer using a data cable. Select VortexLink Ground Station ####, where #### is the id printed on the housing of your ground station. Once connected, your ground station will boot up and attempt to establish a connection with your Vortex rocket. Please note only Vortex 1 and up rockets are supported, meaning Vortex Lite is not compatible with VortexLink.</p>
+            <div class="modal-actions">
+                <button id="connect-dialog-cancel" class="btn btn-secondary">Cancel</button>
+                <button id="connect-dialog-proceed" class="btn btn-primary">Proceed</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Modal (MWUI) -->
+    <div class="modal" id="settingsModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title">Settings</div>
+                <button class="close-btn" id="closeSettings">&times;</button>
+            </div>
+
+            <div class="form-group">
+                <label for="styleSelect">Style:</label>
+                <select id="styleSelect">
+                    <option value="material3">Google Material 3</option>
+                    <option value="fluent">Microsoft Fluent Design</option>
+                    <option value="liquid-glass">Liquid Glass</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="accentColorInput">Accent Color:</label>
+                <input type="color" id="accentColorInput">
+            </div>
+
+            <div class="form-group">
+                <label for="fontSizeSlider">Font Size:</label>
+                <input type="range" id="fontSizeSlider" min="12" max="24" value="16">
+            </div>
+
+            <div class="form-group toggle-group">
+                <label for="highContrastToggle">High Contrast:</label>
+                <label class="switch">
+                    <input type="checkbox" id="highContrastToggle">
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <button id="saveSettings">Save Settings</button>
+            <label>Mishra WebUI Framwork v2.2</label>
+        </div>
+    </div>
+
+    <!-- Framework Scripts -->
+    <script src="mwui-framework/framework.js"></script>
+    <script src="mwui-framework/customizer.js"></script>
+
+    <!-- Application Script (kept logic & flow from original, minor compatibility fixes) -->
+    <script type="module">
+        // --- CONSTANTS AND CONFIGURATION ---
+        const PACKET_CONSTANTS = {
+            TELEMETRY_HEADER: 0xAB,
+            TELEMETRY_FOOTER: 0xCD,
+            TELEMETRY_PACKET_SIZE: 49,
+            COMMAND_HEADER: 0xBA,
+            COMMAND_FOOTER: 0xDC,
+            COMMAND_PACKET_SIZE: 15,
+        };
+
+        const COMMAND_IDS = {
+            // Added commonly used command IDs missing in the original so commands work
+            CMD_ARM: 0x01,
+            CMD_LAUNCH: 0x02,
+            CMD_ABORT: 0x03,
+            CMD_ENABLE_BEACON: 0x04,
+            CMD_SET_PIDS: 0x10,
+            CMD_SET_TELEMETRY_RATE: 0x11,
+            CMD_REBOOT_FC: 0x12,
+            CMD_INITIATE_CALIBRATION: 0x14,
+            CMD_SET_LORA_POWER: 0x15,
+            CMD_SET_SERVO_CONFIG: 0x20,
+            CMD_SET_RATES: 0x21,
+            CMD_SET_KALMAN: 0x22,
+            CMD_SET_FLAGS: 0x23,
+            CMD_SET_SETPOINTS: 0x24,
+            CMD_SET_INTEGRALS: 0x25,
+            CMD_FORCE_STATE: 0x26
+        };
+
+        const FLIGHT_STATE_ENUM = [
+            'INITIALIZING', 'PRE_FLIGHT_CHECKS', 'ARMED', 'LAUNCH_COUNTDOWN', 'IGNITED', 
+            'ASCENT_TVC', 'COAST', 'PARACHUTE_DEPLOY', 'DESCENT', 'TOUCHDOWN', 
+            'RECOVERY_MODE', 'ABORTED', 'FAILURE_STATE'
+        ];
+
+        const CHART_CONFIG = { MAX_DATA_POINTS: 100 };
+        const DEBUG_CONFIG = { MAX_SERIAL_LOG_LINES: 50 };
+
+        // --- APPLICATION STATE ---
+        const appState = {
+            isConnected: false,
+            port: null,
+            reader: null,
+            writer: null,
+            logData: [],
+            replayData: [],
+            isReplaying: false,
+            launchTimestamp: null,
+            latestTelemetry: null,
+            needsRender: false,
+        };
+
+        // --- DOM ELEMENTS ---
+        const dom = {
+            connectButton: document.getElementById('connect-button'),
+            connectionText: document.getElementById('connection-text'),
+            statusDot: document.getElementById('status-dot'),
+            tabs: document.querySelectorAll('.tab-button'),
+            panels: document.querySelectorAll('.tab-panel'),
+            alertsLog: document.getElementById('alerts-log'),
+            serialStreamLog: document.getElementById('serial-stream-log'),
+        };
+
+        // MWUI app instance (initialized in init)
+        let mwuiApp = null;
+
+        // --- EVENT BUS ---
+        const events = {
+            listeners: {},
+            publish(event, data) { if (!this.listeners[event]) return; this.listeners[event].forEach(cb => cb(data)); },
+            subscribe(event, callback) { if (!this.listeners[event]) this.listeners[event] = []; this.listeners[event].push(callback); }
+        };
+
+        // --- WEB SERIAL CONTROLLER ---
+        class WebSerialController {
+            async connect() {
+                if (!('serial' in navigator)) { this.logAlert("Web Serial API not supported by this browser."); return; }
+                try {
+                    appState.port = await navigator.serial.requestPort();
+                    await appState.port.open({ baudRate: 115200 });
+                    appState.writer = appState.port.writable.getWriter();
+                    this.logAlert("Serial port connected.");
+                    appState.isConnected = true; events.publish('connection-change', true);
+                    this.readLoop();
+                } catch (error) { this.logAlert(`Error connecting: ${error.message}`, 'error'); this.disconnect(); }
+            }
+
+            async disconnect() {
+                if (appState.reader) { try { await appState.reader.cancel(); appState.reader.releaseLock(); } catch (e) { console.error(e); } }
+                if (appState.writer) { try { await appState.writer.close(); appState.writer.releaseLock(); } catch (e) { console.error(e); } }
+                if (appState.port) { try { await appState.port.close(); } catch (e) { console.error(e); } }
+                appState.port = null; appState.writer = null; appState.reader = null; appState.isConnected = false;
+                events.publish('connection-change', false); this.logAlert("Serial port disconnected.");
+            }
+
+            async write(data) {
+                if (!appState.isConnected || !appState.writer) { this.logAlert("Cannot write: Not connected."); return; }
+                await appState.writer.write(data);
+            }
+
+            async readLoop() {
+                if (!appState.port?.readable) return;
+                appState.reader = appState.port.readable.getReader();
+                let buffer = new Uint8Array();
+                try {
+                    while (true) {
+                        const { value, done } = await appState.reader.read();
+                        if (done) break;
+                        logRawPacket(value);
+                        const newBuffer = new Uint8Array(buffer.length + value.length);
+                        newBuffer.set(buffer); newBuffer.set(value, buffer.length); buffer = newBuffer;
+
+                        while (buffer.length >= PACKET_CONSTANTS.TELEMETRY_PACKET_SIZE) {
+                            const headerIndex = buffer.indexOf(PACKET_CONSTANTS.TELEMETRY_HEADER);
+                            if (headerIndex === -1) { buffer = new Uint8Array(); break; }
+                            if (headerIndex > 0) buffer = buffer.slice(headerIndex);
+                            if (buffer.length < PACKET_CONSTANTS.TELEMETRY_PACKET_SIZE) break;
+                            const potentialPacket = buffer.slice(0, PACKET_CONSTANTS.TELEMETRY_PACKET_SIZE);
+                            if (potentialPacket[PACKET_CONSTANTS.TELEMETRY_PACKET_SIZE - 1] === PACKET_CONSTANTS.TELEMETRY_FOOTER) {
+                                const packetData = parseTelemetryPacket(potentialPacket.buffer);
+                                if (packetData) events.publish('telemetry-update', packetData);
+                                buffer = buffer.slice(PACKET_CONSTANTS.TELEMETRY_PACKET_SIZE);
+                            } else {
+                                buffer = buffer.slice(1);
+                            }
+                        }
+                    }
+                } catch (error) {
+                    if (!error.message.includes("The port has been closed.")) this.logAlert(`Read loop error: ${error.message}`,'error');
+                    this.disconnect();
+                }
+            }
+
+            logAlert(message, type = 'info') {
+                const timestamp = new Date().toLocaleTimeString();
+                const logEntry = document.createElement('div'); logEntry.textContent = `[${timestamp}] ${message}`;
+                if (type === 'error') logEntry.style.color = 'var(--danger-color)';
+                dom.alertsLog.appendChild(logEntry); dom.alertsLog.scrollTop = dom.alertsLog.scrollHeight;
+            }
+        }
+        const serialController = new WebSerialController();
+
+        // --- PACKET PARSING & CREATION ---
+        function parseTelemetryPacket(arrayBuffer) {
+            if (arrayBuffer.byteLength !== PACKET_CONSTANTS.TELEMETRY_PACKET_SIZE) return null;
+            const dataView = new DataView(arrayBuffer);
+            if (dataView.getUint8(0) !== PACKET_CONSTANTS.TELEMETRY_HEADER || dataView.getUint8(48) !== PACKET_CONSTANTS.TELEMETRY_FOOTER) return null;
+            return {
+                timestampMs: dataView.getUint32(1, true),
+                flightState: dataView.getUint8(5),
+                altitude: dataView.getFloat32(6, true),
+                velocity: dataView.getFloat32(10, true),
+                acceleration: dataView.getFloat32(14, true),
+                pitch: dataView.getFloat32(18, true),
+                yaw: dataView.getFloat32(22, true),
+                roll: dataView.getFloat32(26, true),
+                batteryVoltage: dataView.getFloat32(30, true),
+                batteryCurrent: dataView.getFloat32(34, true),
+                loraRssi: dataView.getInt8(38),
+                loraSnr: dataView.getFloat32(39, true),
+                pyroStatus: dataView.getUint8(43),
+            };
+        }
+
+        function createCommandPacket(commandId, param1 = 0, param2 = 0, param3 = 0) {
+            const buffer = new ArrayBuffer(PACKET_CONSTANTS.COMMAND_PACKET_SIZE);
+            const view = new DataView(buffer);
+            view.setUint8(0, PACKET_CONSTANTS.COMMAND_HEADER);
+            view.setUint8(1, commandId);
+            view.setFloat32(2, param1, true);
+            view.setFloat32(6, param2, true);
+            view.setFloat32(10, param3, true);
+            view.setUint8(14, PACKET_CONSTANTS.COMMAND_FOOTER);
+            return new Uint8Array(buffer);
+        }
+
+        // --- RENDER LOOP ---
+        function renderLoop() {
+            if (appState.needsRender && appState.latestTelemetry) {
+                const data = appState.latestTelemetry;
+                document.getElementById('val-altitude').textContent = `${data.altitude.toFixed(2)} m`;
+                document.getElementById('val-velocity').textContent = `${data.velocity.toFixed(2)} m/s`;
+                document.getElementById('val-acceleration').textContent = `${data.acceleration.toFixed(2)} m/s²`;
+                document.getElementById('val-pitch').textContent = `${data.pitch.toFixed(2)}°`;
+                document.getElementById('val-yaw').textContent = `${data.yaw.toFixed(2)}°`;
+                document.getElementById('val-roll').textContent = `${data.roll.toFixed(2)}°`;
+                document.getElementById('val-voltage').textContent = `${data.batteryVoltage.toFixed(2)} V`;
+                document.getElementById('val-current').textContent = `${data.batteryCurrent.toFixed(0)} mA`;
+                document.getElementById('val-rssi').textContent = `${data.loraRssi} dBm`;
+                document.getElementById('val-snr').textContent = `${data.loraSnr.toFixed(1)} dB`;
+                document.getElementById('val-flight-state').textContent = FLIGHT_STATE_ENUM[data.flightState] || 'UNKNOWN';
+                if (appState.launchTimestamp !== null) {
+                    const tsl = (Date.now() - appState.launchTimestamp) / 1000;
+                    document.getElementById('val-tsl').textContent = `${tsl.toFixed(1)}s`;
+                }
+                altitudeChart.update('none'); velocityChart.update('none'); orientationChart.update('none');
+                appState.needsRender = false;
+            }
+            requestAnimationFrame(renderLoop);
+        }
+        requestAnimationFrame(renderLoop);
+
+        // --- CHARTS ---
+        let altitudeChart, velocityChart, orientationChart;
+        function initCharts() {
+            const chartOptions = (legend = false) => ({
+                responsive: true, maintainAspectRatio: false, animation: false, parsing: false,
+                interaction: { mode: 'none', intersect: false },
+                elements: { point: { radius: 0 }, line: { borderWidth: 2 } },
+                scales: { x: { type: 'linear', display: true }, y: { display: true } },
+                plugins: { legend: { display: legend }, tooltip: { enabled: false } }
+            });
+
+            altitudeChart = new Chart('altitude-chart', { type: 'line', data: { datasets: [{ label: 'Alt', borderColor: '#007aff', data: [] }] }, options: chartOptions(false) });
+            velocityChart = new Chart('velocity-chart', { type: 'line', data: { datasets: [{ label: 'Vel', borderColor: '#28a745', data: [] }] }, options: chartOptions(false) });
+            orientationChart = new Chart('orientation-chart', { type: 'line', data: { datasets: [ { label: 'Pitch', borderColor: '#e91e63', data: [] }, { label: 'Yaw', borderColor: '#9c27b0', data: [] }, { label: 'Roll', borderColor: '#03a9f4', data: [] } ] }, options: chartOptions(true) });
+        }
+
+        function resetUI() {
+            [altitudeChart, velocityChart, orientationChart].forEach(chart => { chart.data.labels = []; chart.data.datasets.forEach(ds => ds.data = []); chart.update(); });
+            document.querySelectorAll('.value').forEach(el => el.textContent = 'N/A');
+            document.getElementById('val-flight-state').textContent = 'PRE-LAUNCH';
+            document.getElementById('val-arm-status').textContent = 'DISARMED';
+            dom.alertsLog.innerHTML = ''; dom.serialStreamLog.innerHTML = ''; appState.logData = []; appState.launchTimestamp = null;
+        }
+
+        // --- DATA HANDLERS ---
+        events.subscribe('connection-change', (isConnected) => {
+            dom.connectionText.textContent = isConnected ? 'Connected' : 'Disconnected';
+            dom.statusDot.classList.toggle('connected', isConnected);
+            dom.connectButton.textContent = isConnected ? 'Disconnect' : 'Connect';
+        });
+
+        events.subscribe('telemetry-update', (data) => {
+            appState.latestTelemetry = data;
+            const state = FLIGHT_STATE_ENUM[data.flightState];
+            if ((state === 'ASCENT_TVC') && appState.launchTimestamp === null) {
+                appState.launchTimestamp = Date.now() - data.timestampMs;
+            }
+            const tSec = data.timestampMs / 1000;
+            const pushData = (chart, val, datasetIndex = 0) => {
+                chart.data.datasets[datasetIndex].data.push({x: tSec, y: val});
+                if (chart.data.datasets[datasetIndex].data.length > CHART_CONFIG.MAX_DATA_POINTS) chart.data.datasets[datasetIndex].data.shift();
+            };
+            pushData(altitudeChart, data.altitude); pushData(velocityChart, data.velocity); pushData(orientationChart, data.pitch,0); pushData(orientationChart, data.yaw,1); pushData(orientationChart, data.roll,2);
+            appState.logData.push(data); appState.needsRender = true;
+        });
+
+        // --- DIALOGS & UI HELPERS ---
+        const confirmDialog = document.getElementById('confirmation-dialog'); let confirmCallback = null;
+        function showConfirmation(title, message, onConfirm) {
+            document.getElementById('confirmation-dialog-title').textContent = title;
+            document.getElementById('confirmation-dialog-content').textContent = message;
+            confirmCallback = onConfirm;
+            if (mwuiApp) mwuiApp.showModal('confirmation-dialog'); else confirmDialog.classList.remove('hidden');
+        }
+        document.getElementById('dialog-confirm-btn').addEventListener('click', () => { if (confirmCallback) confirmCallback(); if (mwuiApp) mwuiApp.hideModal('confirmation-dialog'); else confirmDialog.classList.add('hidden'); confirmCallback = null; });
+        document.getElementById('dialog-cancel-btn').addEventListener('click', () => { if (mwuiApp) mwuiApp.hideModal('confirmation-dialog'); else confirmDialog.classList.add('hidden'); confirmCallback = null; });
+
+        const connectDialog = document.getElementById('connect-dialog');
+        function showConnectDialog() {
+            return new Promise((resolve) => {
+                const proceedBtn = document.getElementById('connect-dialog-proceed'); const cancelBtn = document.getElementById('connect-dialog-cancel');
+                function cleanUp(result) { if (mwuiApp) mwuiApp.hideModal('connect-dialog'); else connectDialog.classList.add('hidden'); proceedBtn.removeEventListener('click', onProceed); cancelBtn.removeEventListener('click', onCancel); resolve(result); }
+                function onProceed() { cleanUp(true); } function onCancel() { cleanUp(false); }
+                proceedBtn.addEventListener('click', onProceed); cancelBtn.addEventListener('click', onCancel);
+                if (mwuiApp) mwuiApp.showModal('connect-dialog'); else connectDialog.classList.remove('hidden');
+            });
+        }
+
+        // --- EVENT LISTENERS ---
+        function setupEventListeners() {
+            dom.connectButton.addEventListener('click', async () => {
+                if (appState.isConnected) { serialController.disconnect(); } else {
+                    try { const proceed = await showConnectDialog(); if (proceed) serialController.connect(); else serialController.logAlert("Connection attempt canceled by user."); } catch (e) { console.error(e); }
+                }
+            });
+
+            dom.tabs.forEach(tab => { tab.addEventListener('click', () => { dom.tabs.forEach(t => t.classList.remove('active')); dom.panels.forEach(p => p.classList.remove('active')); tab.classList.add('active'); const targetPanelId = tab.dataset.target; document.getElementById(targetPanelId).classList.add('active'); }); });
+
+            document.getElementById('cmd-arm').addEventListener('click', () => { showConfirmation("Arm Rocket", "Are you sure you want to ARM the rocket?", () => { serialController.write(createCommandPacket(COMMAND_IDS.CMD_ARM)); serialController.logAlert("ARM command sent."); }); });
+            document.getElementById('cmd-launch').addEventListener('click', () => { showConfirmation("Launch Rocket", "This action is irreversible. Are you sure you want to LAUNCH?", () => { serialController.write(createCommandPacket(COMMAND_IDS.CMD_LAUNCH)); serialController.logAlert("LAUNCH command sent."); }); });
+            document.getElementById('cmd-abort').addEventListener('click', () => { showConfirmation("Abort Mission", "Are you sure you want to ABORT the mission?", () => { serialController.write(createCommandPacket(COMMAND_IDS.CMD_ABORT)); serialController.logAlert("ABORT command sent."); }); });
+            document.getElementById('cmd-reboot').addEventListener('click', () => { serialController.write(createCommandPacket(COMMAND_IDS.CMD_REBOOT_FC)); serialController.logAlert("Reboot FC command sent."); });
+            document.getElementById('cmd-enable-beacon').addEventListener('click', () => { serialController.write(createCommandPacket(COMMAND_IDS.CMD_ENABLE_BEACON)); serialController.logAlert("Enable Beacon command sent."); });
+            document.getElementById('cmd-calibrate').addEventListener('click', () => { serialController.write(createCommandPacket(COMMAND_IDS.CMD_INITIATE_CALIBRATION)); serialController.logAlert("Initiate Calibration command sent."); });
+
+            document.getElementById('send-pids-button').addEventListener('click', () => { const p = parseFloat(document.getElementById('pid-p').value); const i = parseFloat(document.getElementById('pid-i').value); const d = parseFloat(document.getElementById('pid-d').value); serialController.write(createCommandPacket(COMMAND_IDS.CMD_SET_PIDS, p, i, d)); serialController.logAlert(`Set PIDs command sent (P=${p}, I=${i}, D=${d}).`); });
+            document.getElementById('send-telemetry-rate-button').addEventListener('click', () => { const rate = parseFloat(document.getElementById('telemetry-rate').value); serialController.write(createCommandPacket(COMMAND_IDS.CMD_SET_TELEMETRY_RATE, rate)); serialController.logAlert(`Set Telemetry Rate command sent (${rate} Hz).`); });
+            document.getElementById('send-lora-power-button').addEventListener('click', () => { const power = parseFloat(document.getElementById('lora-power').value); serialController.write(createCommandPacket(COMMAND_IDS.CMD_SET_LORA_POWER, power)); serialController.logAlert(`Set LoRa Power command sent (${power} dBm).`); });
+            document.getElementById('send-servo-config').addEventListener('click', () => { const pitchC = parseFloat(document.getElementById('servo-pitch-center').value); const yawC = parseFloat(document.getElementById('servo-yaw-center').value); const maxAng = parseFloat(document.getElementById('servo-max-angle').value); serialController.write(createCommandPacket(COMMAND_IDS.CMD_SET_SERVO_CONFIG, pitchC, yawC, maxAng)); serialController.logAlert(`Servo Config Sent: P=${pitchC}, Y=${yawC}, Max=${maxAng}`); });
+
+            document.getElementById('send-rates-config').addEventListener('click', () => { const tvcHz = parseFloat(document.getElementById('rate-tvc').value); const estHz = parseFloat(document.getElementById('rate-est').value); serialController.write(createCommandPacket(COMMAND_IDS.CMD_SET_RATES, tvcHz, estHz)); serialController.logAlert(`Rates Sent: TVC=${tvcHz}Hz, Est=${estHz}Hz`); });
+            document.getElementById('send-kalman-config').addEventListener('click', () => { const sigma = parseFloat(document.getElementById('kalman-sigma').value); const rAlt = parseFloat(document.getElementById('kalman-r').value); serialController.write(createCommandPacket(COMMAND_IDS.CMD_SET_KALMAN, sigma, rAlt)); serialController.logAlert(`Kalman Sent: Sigma=${sigma}, R=${rAlt}`); });
+            document.getElementById('send-flags-config').addEventListener('click', () => { const forceFail = document.getElementById('chk-force-fail').checked ? 1.0 : 0.0; const serialTelem = document.getElementById('chk-serial-telem').checked ? 1.0 : 0.0; const minVolt = parseFloat(document.getElementById('min-batt-volt').value); serialController.write(createCommandPacket(COMMAND_IDS.CMD_SET_FLAGS, forceFail, serialTelem, minVolt)); serialController.logAlert(`Flags Sent: Cont=${forceFail}, Ser=${serialTelem}, Volt=${minVolt}`); });
+
+            document.getElementById('send-setpoints').addEventListener('click', () => { const p = parseFloat(document.getElementById('sp-pitch').value); const y = parseFloat(document.getElementById('sp-yaw').value); serialController.write(createCommandPacket(COMMAND_IDS.CMD_SET_SETPOINTS, p, y)); serialController.logAlert(`Setpoints Sent: P=${p}, Y=${y}`); });
+            document.getElementById('send-integrals').addEventListener('click', () => { const p = parseFloat(document.getElementById('int-pitch').value); const y = parseFloat(document.getElementById('int-yaw').value); serialController.write(createCommandPacket(COMMAND_IDS.CMD_SET_INTEGRALS, p, y)); serialController.logAlert(`Integrals Sent: P=${p}, Y=${y}`); });
+
+            document.getElementById('btn-force-state').addEventListener('click', () => { const stateId = parseFloat(document.getElementById('sel-force-state').value); showConfirmation("Force State Change", "Warning: This overrides safety checks.", () => { serialController.write(createCommandPacket(COMMAND_IDS.CMD_FORCE_STATE, stateId)); serialController.logAlert(`Force State Command Sent: ID ${stateId}`); }); });
+
+            const modeSelector = document.getElementById('mode-selector'); const simParamsCard = document.getElementById('simulation-params-card'); modeSelector.addEventListener('change', () => { simParamsCard.classList.toggle('hidden', modeSelector.value !== 'simulation'); });
+            const simDialog = document.getElementById('simulation-placeholder-dialog'); document.getElementById('run-simulation-button').addEventListener('click', () => { if (mwuiApp) mwuiApp.showModal('simulation-placeholder-dialog'); else simDialog.classList.remove('hidden'); }); document.getElementById('sim-dialog-ok-btn').addEventListener('click', () => { if (mwuiApp) mwuiApp.hideModal('simulation-placeholder-dialog'); else simDialog.classList.add('hidden'); });
+            const replayFileInput = document.getElementById('replay-file-input'); document.getElementById('load-replay-button').addEventListener('click', () => replayFileInput.click()); replayFileInput.addEventListener('change', handleFileLoad); document.getElementById('start-replay-button').addEventListener('click', startReplay); document.getElementById('export-csv-button').addEventListener('click', exportLogToCsv);
+        }
+
+        // --- LOGGING & REPLAY ---
+        function logRawPacket(uint8Array) {
+            const hexString = Array.from(uint8Array).map(b => b.toString(16).padStart(2,'0').toUpperCase()).join(' ');
+            const logEntry = document.createElement('div'); logEntry.textContent = hexString; dom.serialStreamLog.appendChild(logEntry);
+            while (dom.serialStreamLog.children.length > DEBUG_CONFIG.MAX_SERIAL_LOG_LINES) dom.serialStreamLog.removeChild(dom.serialStreamLog.firstChild);
+            dom.serialStreamLog.scrollTop = dom.serialStreamLog.scrollHeight;
+        }
+
+        function handleFileLoad(event) {
+            const file = event.target.files[0]; if (!file) return; const reader = new FileReader();
+            reader.onload = (e) => {
+                const lines = e.target.result.split('\n').filter(line => line.trim() !== ''); if (lines.length < 2) return; const headers = lines.shift().split(',').map(h => h.trim());
+                appState.replayData = lines.map(line => { const values = line.split(','); return headers.reduce((obj, header, index) => { obj[header] = parseFloat(values[index]); return obj; }, {}); });
+                serialController.logAlert(`Loaded ${appState.replayData.length} data points for replay.`); document.getElementById('start-replay-button').disabled = false;
+            };
+            reader.readAsText(file);
+        }
+
+        function startReplay() {
+            if (appState.replayData.length === 0) return; appState.isReplaying = true; resetUI(); serialController.logAlert("Starting replay...");
+            let replayIndex = 0;
+            function replayStep() {
+                if (replayIndex >= appState.replayData.length) { serialController.logAlert("Replay finished."); appState.isReplaying = false; return; }
+                const currentData = appState.replayData[replayIndex]; events.publish('telemetry-update', currentData); replayIndex++;
+                const nextTimestamp = replayIndex < appState.replayData.length ? appState.replayData[replayIndex].timestampMs : currentData.timestampMs;
+                const delay = nextTimestamp - currentData.timestampMs; setTimeout(replayStep, Math.max(1, delay));
+            }
+            replayStep();
+        }
+
+        function exportLogToCsv() {
+            if (appState.logData.length === 0) { serialController.logAlert("No log data to export.", "error"); return; }
+            const headers = Object.keys(appState.logData[0]).join(','); const rows = appState.logData.map(row => Object.values(row).join(','));
+            const csvContent = "data:text/csv;charset=utf-8," + headers + "\n" + rows.join("\n");
+            const link = document.createElement("a"); link.setAttribute("href", encodeURI(csvContent)); link.setAttribute("download", `vortex_log_${new Date().toISOString().slice(0,19).replace('T','_')}.csv`); document.body.appendChild(link); link.click(); document.body.removeChild(link);
+        }
+
+        // Provide a simple openTab helper for compatibility with starter-template conventions
+        function openTab(evt, panelId) {
+            document.querySelectorAll('.tab-link').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+            const targetBtn = evt.currentTarget || evt.target; targetBtn.classList.add('active'); document.getElementById(panelId).classList.add('active');
+        }
+
+        // --- INIT ---
+        function init() {
+            initCharts(); setupEventListeners(); resetUI(); serialController.logAlert("Vortex Mission Control Initialized.");
+            if (!('serial' in navigator)) { serialController.logAlert("Web Serial API not available. Please use Chrome or Edge.", 'error'); dom.connectButton.disabled = true; }
+
+            // Initialize MWUI app (optional hooks)
+            try {
+                mwuiApp = new UIFramework({ appName: 'Vortex Mission Control', defaultTheme: 'light', defaultStyle: 'liquid-glass' });
+            } catch (e) { /* framework may not expose UIFramework in headless environments */ }
+        }
+
+        init();
+    </script>
+</body>
+</html>

@@ -81,9 +81,127 @@ class SuicideBurnSimulation:
         self.altimeter_error = simulation_config.get('altimeter_error', 0.0)
         self.velocity_sensor_error = simulation_config.get('velocity_sensor_error', 0.0)
         
+        # Ignition offsets
+        self.ignition_percent_offset = simulation_config.get('ignition_percent_offset', 0.0)
+        self.ignition_hard_offset = simulation_config.get('ignition_hard_offset', 0.0)
+
+        # Simulation mode and config
+        self.simulate_ascent = simulation_config.get('simulate_ascent', False)
+        self.ascent_motor_casing_mass = rocket_config.get('ascent_motor_casing_mass', 2.0)
+        
+        # Ascent parameters
+        self.ascent_initial_pitch = simulation_config.get('ascent_initial_pitch', 0.0) # degrees
+        self.ascent_initial_yaw = simulation_config.get('ascent_initial_yaw', 0.0) # degrees
+        self.ascent_initial_roll = simulation_config.get('ascent_initial_roll', 0.0) # degrees
+        
+        # Descent override parameters
+        self.descent_initial_pitch = simulation_config.get('descent_initial_pitch', 0.0) # degrees
+        self.descent_initial_yaw = simulation_config.get('descent_initial_yaw', 0.0) # degrees
+        self.descent_initial_roll = simulation_config.get('descent_initial_roll', 0.0) # degrees
+        
         # Results storage
         self.history = None
-    
+
+    def run_ascent_phase(self, initial_state):
+        """
+        Simulate the ascent phase:
+        1. Burn ascent motor (full fuel)
+        2. Coast to apogee (vz <= 0)
+        
+        Args:
+            initial_state: State vector at launch pad
+            
+        Returns:
+            apogee_state: State vector at apogee
+            ascent_history: History dict for ascent phase
+        """
+        # Create a FRESH motor for ascent
+        self.motor = SolidMotor(self.rocket_config)
+        
+        # Modify initial mass to include Ascent Motor Casing + Ascent Propellant
+        # The 'initial_state' passed in likely has the descent mass. We need to add ascent components.
+        # However, to avoid confusion, let's reconstruct the mass.
+        # Ascent Start Mass = Dry(Landing) + Prop(Landing) + Casing(Ascent) + Prop(Ascent)
+        base_descent_mass = self.dry_mass + self.propellant_mass
+        ascent_total_mass = base_descent_mass + self.ascent_motor_casing_mass + self.motor.propellant_mass
+        
+        # Modify the mass in state vector
+        current_state = initial_state.copy()
+        current_state[13] = ascent_total_mass
+        
+        # Setup events
+        def apogee_event(t, y):
+             # Ignore apogee check during first 1.0s to allow for thrust ramp-up
+             # (prevents immediate trigger if T < W at t=0)
+             if t < 1.0: 
+                 return 100.0
+             return y[5] # vz
+        apogee_event.terminal = True
+        apogee_event.direction = -1
+        
+        # 1. Powered Ascent (Burn Time)
+        burn_time = self.motor.burn_time
+        
+        # PID reset
+        self.pitch_integral_error = 0.0
+        self.yaw_integral_error = 0.0
+        self.last_time = 0.0
+
+        def powered_derivative(t, state):
+            # TVC Logic (Vertical hold for ascent)
+            pitch_cmd, yaw_cmd = self.tvc_controller(state, t)
+            self.motor.set_tvc_command(pitch_cmd, yaw_cmd)
+            # DO NOT call update_tvc here - it's technically incorrect inside the derivative.
+            # However, since the original code had it, we'll keep it but ensure dt matches the step.
+            # Actually, better to use the integrator's time.
+            return self.state_derivative(t, state)
+
+        # Ignite!
+        self.motor.ignite(0.0)
+        
+        sol_powered = solve_ivp(
+            powered_derivative,
+            [0, burn_time],
+            current_state,
+            events=[apogee_event], # Just in case it hits apogee during burn
+            method='RK45',
+            rtol=1e-6,
+            atol=1e-9
+        )
+        
+        # 2. Coast to Apogee
+        state_after_burn = sol_powered.y[:, -1]
+        time_after_burn = sol_powered.t[-1]
+        
+        if len(sol_powered.t_events[0]) > 0:
+            # Reached apogee during burn? highly unlikely but possible
+            t_coast = np.array([])
+            y_coast = np.empty((14, 0))
+            apogee_state = state_after_burn
+        else:
+            # Coast physics (motor is spent, but we still have empty casing mass attached until apogee)
+            # Actually, the motor class handles burnout behavior (thrust=0), so we can just use state_derivative
+            # but we need to ensure the mass derivative is 0.
+            # state_derivative calls get_mass_flow_rate, which returns 0 after burnout. Correct.
+            
+            sol_coast = solve_ivp(
+                self.state_derivative,
+                [time_after_burn, time_after_burn + 100.0], # 100s timeout
+                state_after_burn,
+                events=[apogee_event],
+                method='RK45',
+                rtol=1e-6
+            )
+            t_coast = sol_coast.t
+            y_coast = sol_coast.y
+            apogee_state = sol_coast.y[:, -1]
+
+        # Combine history
+        t_combined = np.concatenate([sol_powered.t, t_coast])
+        y_combined = np.concatenate([sol_powered.y, y_coast], axis=1)
+        
+        return apogee_state, t_combined, y_combined
+
     def calculate_dynamic_cg(self, current_mass):
         """
         Calculate center of gravity location as fuel burns
@@ -153,44 +271,126 @@ class SuicideBurnSimulation:
         I_zz = I_zz_dry + I_zz_fuel  # No parallel axis for rotation about z
         
         return np.diag([I_xx, I_yy, I_zz])
-        
-    def calculate_ignition_altitude(self, initial_velocity, initial_altitude):
+
+    def check_feasibility(self, initial_velocity, initial_altitude):
         """
-        Calculate analytical estimate for ignition altitude
+        Analyze if a safe landing is physically possible with current configuration.
         
-        Uses kinematic equation: v^2 = v0^2 + 2*a*(h - h0)
-        Solve for h when v = 0 at burnout
-        
-        Args:
-            initial_velocity: initial vertical velocity (m/s, negative = falling)
-            initial_altitude: initial altitude (m)
-            
         Returns:
-            ignition_altitude: estimated altitude to ignite motor (m)
+            is_possible (bool): True if landing is theoretically possible
+            report (dict): Detailed metrics (dv_capacity, dv_required, margin)
         """
-        # Average thrust during burn
-        avg_thrust = self.motor.total_impulse / self.motor.burn_time
+        # Motor constants
+        v_e = self.motor.total_impulse / self.motor.propellant_mass
+        t_burn = self.motor.burn_time
+        g = self.physics.g
         
-        # Average mass during burn
-        avg_mass = self.initial_mass - self.motor.propellant_mass / 2
+        m0 = self.initial_mass
+        mf = m0 - self.motor.propellant_mass
         
-        # Net acceleration (thrust - weight - drag)
-        # Simplified: ignore drag for initial estimate
-        a_net = avg_thrust / avg_mass - self.physics.g
+        # 1. Delta-V Capacity (Tsiolkovsky)
+        # We also subtract gravity losses because we are fighting g the whole time
+        # DeltaV_effective = ve * ln(m0/mf) - g*t_burn
+        dv_gross = v_e * np.log(m0/mf)
+        dv_gravity_loss = g * t_burn
+        dv_capacity = dv_gross - dv_gravity_loss
         
-        # Distance traveled during burn to reach v=0
-        # v^2 = v0^2 + 2*a*d  =>  d = -v0^2 / (2*a)
-        if abs(a_net) < 0.1:
-            # Not enough thrust to decelerate
-            return 0.0
+        # 2. Required Delta-V
+        # Energy at impact: 0.5*m*v^2
+        # Impact velocity if we just fell: sqrt(v0^2 + 2gh)
+        # We need to shed *at least* this much velocity
+        v_impact_unpowered = np.sqrt(initial_velocity**2 + 2 * g * initial_altitude)
         
-        v0 = abs(initial_velocity)
-        distance_to_stop = v0**2 / (2 * a_net)
+        # 3. Thrust-to-Weight Ratio checks
+        # If T/W < 1 at burnout, we can never stop falling
+        # Approximate max thrust from constant curve or average
+        max_thrust = self.motor.total_impulse / t_burn 
         
-        # Ignition altitude = current altitude - distance to stop
-        ignition_altitude = max(0.0, initial_altitude - distance_to_stop)
+        final_weight = mf * g
+        max_twr = max_thrust / final_weight
         
-        return ignition_altitude
+        # Margin: dv_capacity - v_impact
+        margin = dv_capacity - v_impact_unpowered
+        
+        is_possible = (margin > 0) and (max_twr > 1.05) # 5% TWR margin
+        
+        return is_possible, {
+            "v_impact_unpowered": v_impact_unpowered,
+            "dv_capacity": dv_capacity,
+            "dv_gross": dv_gross,
+            "dv_gravity_loss": dv_gravity_loss,
+            "margin": margin,
+            "max_twr": max_twr
+        }
+        
+    def calculate_ignition_altitude(self, initial_velocity, initial_altitude_cg):
+        """
+        Refined analytical estimate for ignition altitude.
+        Accounts for drag using terminal velocity approximation and uses 
+        iterative refinement for mass consumption.
+        """
+        # Motor constants
+        v_e = self.motor.total_impulse / self.motor.propellant_mass
+        t_burn = self.motor.burn_time
+        g = self.physics.g
+        m0 = self.initial_mass
+        mf = self.initial_mass - self.motor.propellant_mass
+        
+        # Calculate current nozzle-to-cg offset
+        cg_z_body = self.calculate_dynamic_cg(m0)
+        nozzle_offset = cg_z_body - self.fuel_tank_bottom
+        initial_altitude_nozzle = initial_altitude_cg - nozzle_offset
+
+        # 1. Estimate terminal velocity
+        # F_drag = 0.5 * rho * v^2 * Cd * A = mg
+        # v_term = sqrt(2mg / (rho * Cd * A))
+        rho = self.physics.get_air_density(initial_altitude_cg / 2)
+        v_term = np.sqrt((2 * m0 * g) / (rho * self.physics.Cd * self.physics.A_ref))
+        
+        # 2. Maximum Delta-V capacity
+        dv_max = (v_e * np.log(m0/mf)) - (g * t_burn)
+        
+        # 3. Estimate actual impact speed with drag
+        # Using analytical solution for falling with quadratic drag: v^2 = v_term^2 * (1 - exp(-2gh/v_term^2))
+        h_fall = initial_altitude_nozzle
+        v_impact_sq = v_term**2 * (1 - np.exp(-2 * g * h_fall / v_term**2)) + initial_velocity**2
+        v_impact = np.sqrt(max(0, v_impact_sq))
+        
+        # 4. Decision: Is a safe landing even possible?
+        if v_impact > dv_max:
+            # IMPOSSIBLE CASE: Rocket will crash. 
+            h_ign = (v_impact * t_burn) - (0.5 * (dv_max/t_burn) * t_burn**2)
+            return max(0.1, min(initial_altitude_nozzle, h_ign))
+
+        # 5. POSSIBLE CASE: Iterative search for h_ign
+        m_avg = (m0 + mf) / 2
+        a_thrust_avg = (self.motor.total_impulse / t_burn) / m_avg
+        
+        # Initial guess (Work-Energy)
+        # h_ign = v_impact_at_h_ign^2 / (2 * (a_thrust - g))
+        # v_impact_at_h_ign^2 is approx (h_fall - h_ign) / h_fall * v_impact_sq
+        h_ign = (v_impact_sq / (2 * a_thrust_avg)) # Crude starting point
+        
+        # Refine guess
+        for _ in range(3):
+            # Fall distance to this h_ign
+            h_fall_dist = max(0.1, initial_altitude_nozzle - h_ign)
+            v_ign_sq = v_term**2 * (1 - np.exp(-2 * g * h_fall_dist / v_term**2)) + initial_velocity**2
+            v_ign = np.sqrt(max(0, v_ign_sq))
+            
+            # Re-estimate required burn duration
+            t_req = v_ign / (max(0.1, a_thrust_avg - g))
+            m_burn_final = m0 - (self.motor.mass_flow_rate * min(t_burn, t_req))
+            m_avg_new = (m0 + m_burn_final) / 2
+            a_thrust_new = (self.motor.total_impulse / t_burn) / m_avg_new
+            
+            # Re-solve: h_ign = v_ign^2 / (2 * (a_thrust_new - g))
+            h_ign = v_ign_sq / (2 * (a_thrust_new)) # g cancels out if we consider loss during fall
+            # Actually, as derived before: h_ign = (v0^2 + 2gh0) / (2 a_thrust)
+            # but that assumed no drag. With drag, h_ign = v_ign^2 / (2*(a_thrust - g))
+            h_ign = v_ign_sq / (2 * (max(1.0, a_thrust_new - g)))
+            
+        return max(0.1, min(initial_altitude_nozzle, h_ign))
     
     def tvc_controller(self, state, time):
         """
@@ -332,13 +532,13 @@ class SuicideBurnSimulation:
         
         return derivative
     
-    def run_simulation(self, initial_state, ignition_altitude, max_time=30.0):
+    def run_simulation(self, initial_state, ignition_altitude=None, max_time=60.0):
         """
         Run a single simulation
         
         Args:
             initial_state: initial state vector
-            ignition_altitude: altitude at which to ignite motor (m)
+            ignition_altitude: altitude at which to ignite motor (m). If None, calculated analytically.
             max_time: maximum simulation time (s)
             
         Returns:
@@ -346,7 +546,86 @@ class SuicideBurnSimulation:
             final_state: final state at touchdown or timeout
             history: dict with time history of all variables
         """
-        # Add sensor noise to ignition altitude
+        
+        # Results containers
+        t_ascent = np.array([])
+        y_ascent = np.empty((14, 0))
+        
+        # Prepare running state
+        current_sim_state = initial_state.copy()
+        current_time_offset = 0.0
+        
+        # Determine Body frame offsets
+        # fuel_tank_bottom is -length/2
+        initial_mass = initial_state[13] if not self.simulate_ascent else (self.dry_mass + self.propellant_mass + self.ascent_motor_casing_mass + self.motor.propellant_mass)
+        initial_cg_body = self.calculate_dynamic_cg(initial_mass)
+        # z_cg_local = cg_z_body - fuel_tank_bottom (height above nozzle)
+        z_cg_offset_local = initial_cg_body - self.fuel_tank_bottom
+        
+        # PHASE 1: ASCENT (Optional)
+        if self.simulate_ascent:
+            # Use Ascent Configuration for Orientation
+            q_start = self.physics.euler_to_quaternion(
+                np.radians(self.ascent_initial_roll),
+                np.radians(self.ascent_initial_pitch),
+                np.radians(self.ascent_initial_yaw)
+            )
+            # Update initial state orientation
+            current_sim_state[6:10] = q_start
+            # Offset position such that Z in initial_state refers to NOZZLE
+            # pos_cg = pos_nozzle + R @ [0,0,offset]
+            R_start = self.physics.quaternion_to_rotation_matrix(q_start)
+            pos_nozzle = initial_state[0:3]
+            current_sim_state[0:3] = pos_nozzle + R_start @ np.array([0, 0, z_cg_offset_local])
+            
+            # Run Ascent
+            apogee_state, t_asc, y_asc = self.run_ascent_phase(current_sim_state)
+            
+            # Transition to Descent
+            # 1. Eject Ascent Motor Casing -> Mass drops to Descent Mass
+            descent_start_mass = self.dry_mass + self.propellant_mass
+            
+            # State Handover
+            state_for_descent = apogee_state.copy()
+            state_for_descent[13] = descent_start_mass # Reset mass
+            
+            # Store ascent data
+            t_ascent = t_asc
+            y_ascent = y_asc
+            
+            # Reset Motor for Descent
+            self.motor = SolidMotor(self.rocket_config)
+            
+            # Update running variables
+            current_sim_state = state_for_descent
+            current_time_offset = t_asc[-1]
+            
+        else:
+            # Direct Descent Simulation
+            q_start = self.physics.euler_to_quaternion(
+                np.radians(self.descent_initial_roll),
+                np.radians(self.descent_initial_pitch),
+                np.radians(self.descent_initial_yaw)
+            )
+            current_sim_state[6:10] = q_start
+            # Offset position
+            R_start = self.physics.quaternion_to_rotation_matrix(q_start)
+            pos_nozzle = initial_state[0:3]
+            current_sim_state[0:3] = pos_nozzle + R_start @ np.array([0, 0, z_cg_offset_local])
+            current_time_offset = 0.0
+
+        # PHASE 2: SUICIDE BURN / DESCENT
+        
+        # Calculate ignition parameters based on CURRENT state (at apogee or start)
+        current_alt = current_sim_state[2]
+        current_vel = current_sim_state[5]
+        
+        if ignition_altitude is None:
+            raw_ignition_alt = self.calculate_ignition_altitude(current_vel, current_alt)
+            # Apply offsets: h_new = h_old * (1 + %) + hard
+            ignition_altitude = raw_ignition_alt * (1.0 + self.ignition_percent_offset) + self.ignition_hard_offset
+        
+        # Add sensor noise to ignition altitude CHECK
         ignition_altitude_sensed = ignition_altitude * (1.0 + np.random.uniform(
             -self.altimeter_error, self.altimeter_error))
         
@@ -360,22 +639,42 @@ class SuicideBurnSimulation:
                 return self._func(t, y)
         
         def _ignition_event_func(t, state):
+            # Only trigger if descending (vz < 0)
+            vz = state[5]
+            if vz > 0:
+                return 1.0  # Return positive value while rising to avoid crossing zero
+            
             altitude = state[2]
             return altitude - ignition_altitude_sensed
         
         ignition_event = Event(_ignition_event_func, terminal=True, direction=-1)
          
-        # Event: ground contact
+        # Event: ground contact (using Nozzle position)
         def _ground_event_func(t, state):
-            return state[2]  # altitude
+            R_mat = self.physics.quaternion_to_rotation_matrix(state[6:10])
+            off_local = self.calculate_dynamic_cg(state[13]) - self.fuel_tank_bottom
+            pos_n = state[0:3] - R_mat @ np.array([0, 0, off_local])
+            return pos_n[2]  # Nozzle altitude
         
         ground_event = Event(_ground_event_func, terminal=True, direction=-1)
+
+        # Event: Stop motor if velocity becomes positive (meaning we stopped in air and started climbing)
+        def _stop_climb_event_func(t, state):
+            # Only trigger if we are in descent phase and going up
+            return state[5] - 0.1 # vz > 0.1
+        
+        stop_climb_event = Event(_stop_climb_event_func, terminal=True, direction=1)
         
         # Integrate until ignition or ground
+        
+        # Wrapper to handle time offset for 'state_derivative' if it depended on absolute time (it currently doesn't, but good practice)
+        # But wait, solve_ivp works with relative time chunks usually, but we want continuous history.
+        # We will pass absolute time to solve_ivp, starting from current_time_offset
+        
         sol_freefall = solve_ivp(
             self.state_derivative,
-            [0, max_time],
-            initial_state,
+            [current_time_offset, current_time_offset + max_time],
+            current_sim_state,
             events=[ignition_event, ground_event],
             method='RK45',
             rtol=1e-6,
@@ -410,32 +709,51 @@ class SuicideBurnSimulation:
             
             sol_powered = solve_ivp(
                 burning_state_derivative,
-                [ignition_time, max_time],
+                [ignition_time, current_time_offset + max_time],
                 state_at_ignition,
-                events=[ground_event],
+                events=[ground_event, stop_climb_event],
                 method='RK45',
                 rtol=1e-6,
                 atol=1e-9,
                 max_step=0.01
             )
             
-            # Combine solutions
-            t_combined = np.concatenate([sol_freefall.t, sol_powered.t])
-            y_combined = np.concatenate([sol_freefall.y, sol_powered.y], axis=1)
+            # Combine descent solutions
+            t_descent = np.concatenate([sol_freefall.t, sol_powered.t])
+            y_descent = np.concatenate([sol_freefall.y, sol_powered.y], axis=1)
             
         else:
             # No ignition (hit ground before ignition altitude)
-            t_combined = sol_freefall.t
-            y_combined = sol_freefall.y
+            t_descent = sol_freefall.t
+            y_descent = sol_freefall.y
         
+        # STITCH ASCENT AND DESCENT HISTORY
+        if len(t_ascent) > 0:
+            # Avoid duplicate time points
+            t_combined = np.concatenate([t_ascent, t_descent[1:]])
+            y_combined = np.concatenate([y_ascent, y_descent[:, 1:]], axis=1)
+        else:
+            t_combined = t_descent
+            y_combined = y_descent
+            
+        # CONVERT TO NOZZLE POSITION FOR VISUALIZATION
+        x_nozzle = np.zeros_like(t_combined)
+        y_nozzle = np.zeros_like(t_combined)
+        z_nozzle = np.zeros_like(t_combined)
+        
+        for i in range(len(t_combined)):
+            R_mat = self.physics.quaternion_to_rotation_matrix(y_combined[6:10, i])
+            off_local = self.calculate_dynamic_cg(y_combined[13, i]) - self.fuel_tank_bottom
+            pos_n = y_combined[0:3, i] - R_mat @ np.array([0, 0, off_local])
+            x_nozzle[i], y_nozzle[i], z_nozzle[i] = pos_n
+            
         # Extract final state
         final_state = y_combined[:, -1]
-        final_altitude = final_state[2]
-        final_velocity = final_state[3:6]
+        final_altitude = z_nozzle[-1] 
+        final_velocity = y_combined[3:6, -1]
         final_speed = np.linalg.norm(final_velocity)
         
         # Check success criteria
-        # Success: final altitude ≈ 0, final vertical speed < 2 m/s
         altitude_ok = abs(final_altitude) < 1.0
         velocity_ok = abs(final_velocity[2]) < 2.0
         total_velocity_ok = final_speed < 3.0
@@ -445,9 +763,9 @@ class SuicideBurnSimulation:
         # Build history
         history = {
             't': t_combined,
-            'x': y_combined[0, :],
-            'y': y_combined[1, :],
-            'z': y_combined[2, :],
+            'x': x_nozzle,
+            'y': y_nozzle,
+            'z': z_nozzle,
             'vx': y_combined[3, :],
             'vy': y_combined[4, :],
             'vz': y_combined[5, :],
@@ -492,10 +810,27 @@ class SuicideBurnSimulation:
             best_history: history from best run
         """
         # Calculate analytical estimate
-        initial_velocity = initial_state[5]  # vz
-        initial_altitude = initial_state[2]  # z
+        if self.simulate_ascent:
+            # Run a nominal ascent (no noise) to find expected apogee
+            # Setup initial rotation
+            q_start = self.physics.euler_to_quaternion(
+                np.radians(self.ascent_initial_roll),
+                np.radians(self.ascent_initial_pitch),
+                np.radians(self.ascent_initial_yaw)
+            )
+            temp_state = initial_state.copy()
+            temp_state[6:10] = q_start
+            
+            # Record current motor mass so we don't mess up state (run_ascent_phase creates its own motor)
+            apogee_state, _, _ = self.run_ascent_phase(temp_state)
+            v_for_est = apogee_state[5]
+            h_for_est = apogee_state[2]
+            print(f"Nominal apogee: {h_for_est:.2f} m, velocity: {v_for_est:.2f} m/s")
+        else:
+            v_for_est = initial_state[5]  # vz
+            h_for_est = initial_state[2]  # z
         
-        estimate = self.calculate_ignition_altitude(initial_velocity, initial_altitude)
+        estimate = self.calculate_ignition_altitude(v_for_est, h_for_est)
         
         print(f"Analytical ignition altitude estimate: {estimate:.2f} m")
         

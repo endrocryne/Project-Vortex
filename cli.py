@@ -13,6 +13,50 @@ from datetime import datetime
 from simulation import SuicideBurnSimulation
 
 
+def print_banner():
+    banner = r"""
+  _______ ________   _______  _  _______  _        _______ _________ _________ _______ 
+ (  ____ \\__   __/  (  ____ \| |/ /_   _|( (    /|(  ____ \\__   __/ \__   __/(  ____ \
+ | (    \/   ) (     | (    \/| ' /  | |  |  \  ( || (    \/   ) (       ) (   | (    \/
+ | (__       | |     | (__    |  <   | |  |   \ | || (__       | |       | |   | |      
+ |  __)      | |     |  __)   |  \ \ | |  | (\ \) ||  __)      | |       | |   | |      
+ | (         | |     | (      | . \ \| |  | | \   || (         | |       | |   | |      
+ | (____/\   | |     | (____/\| |\  \_| |_| |  \  || (____/\   | |    ___) (___| (____/\
+ (_______/   \_/     (_______/|_| \_/\___/|_|   )_)(_______/   \_/    \_______/(_______/
+                                                                                        
+         !
+         !
+         ^
+        / \
+       /___\
+      |=   =|
+      |  T  |
+      |  E  |
+      |  X  |
+      |  T  |
+      |     |
+      |  K  |
+      |  I  |
+      |  N  |
+      |     |
+      |_____|
+     /|##!##|\
+    / |##!##| \
+   /  |##!##|  \
+  | /  /   \  \ |
+  |/  /     \  \|
+      -------
+     /   X   \
+    /    X    \
+   /     X     \
+"""
+    # Use cyan for banner, yellow for header
+    print("\033[96m" + banner + "\033[0m")
+    print("\033[93m" + "  >>> VORTEX DESKTOP SUITE - TEXTKINETIC v0.4.3 <<<" + "\033[0m")
+    print("\033[92m" + "  >>> INITIALIZING 6DOF FLIGHT PARAMETERS...      <<<" + "\033[0m")
+    print("-" * 60 + "\n")
+
+
 def run_single_simulation(config_file=None, sim_overrides=None):
     """Run a single simulation with parameters"""
     
@@ -76,8 +120,8 @@ def run_single_simulation(config_file=None, sim_overrides=None):
     sim = SuicideBurnSimulation(rocket_config, env_config, sim_config)
     
     # Initial conditions
-    initial_altitude = 1000.0
-    initial_velocity = -50.0
+    initial_altitude = env_config.get('initial_altitude', 1000.0)
+    initial_velocity = env_config.get('initial_velocity', -50.0)
     
     initial_state = np.array([
         0, 0, initial_altitude,
@@ -91,12 +135,29 @@ def run_single_simulation(config_file=None, sim_overrides=None):
     print(f"\nInitial altitude: {initial_altitude:.2f} m")
     print(f"Initial velocity: {initial_velocity:.2f} m/s")
     
-    ignition_altitude = sim.calculate_ignition_altitude(initial_velocity, initial_altitude)
-    print(f"Calculated ignition altitude: {ignition_altitude:.2f} m")
+    # Feasibility Check
+    print("-" * 40)
+    print("FEASIBILITY CHECK")
+    is_possible, r = sim.check_feasibility(initial_velocity, initial_altitude)
+    print(f"Status: {'POSSIBLE' if is_possible else 'IMPOSSIBLE'}")
+    print(f"Impact Speed (No Burn): {r['v_impact_unpowered']:.1f} m/s")
+    print(f"Delta-V Capacity:       {r['dv_capacity']:.1f} m/s (Gross: {r['dv_gross']:.1f}, Gravity Loss: {r['dv_gravity_loss']:.1f})")
+    print(f"Margin:                 {r['margin']:.1f} m/s")
+    print(f"Max TWR:                {r['max_twr']:.2f}")
+    
+    if not is_possible:
+        print("\nWARNING: Landing appears physically impossible with current configuration.")
+    print("-" * 40)
     
     # Run simulation
     print("\nRunning simulation...")
-    success, final_state, history = sim.run_simulation(initial_state, ignition_altitude)
+    # Passing ignition_altitude=None allows the simulation to calculate it 
+    # dynamically based on apogee if simulate_ascent is True.
+    success, final_state, history = sim.run_simulation(initial_state, None)
+    
+    # Ignition altitude used (can be retrieved from history)
+    actual_ignition_altitude = history.get('ignition_altitude', 0.0)
+    print(f"Calculated ignition altitude: {actual_ignition_altitude:.2f} m")
     
     # Results
     print("\n" + "=" * 60)
@@ -108,12 +169,23 @@ def run_single_simulation(config_file=None, sim_overrides=None):
     print(f"Final vertical velocity: {history['vz'][-1]:.3f} m/s")
     print(f"Simulation time: {history['t'][-1]:.3f} s")
     
-    # Save results
-    os.makedirs('results', exist_ok=True)
+    # Results folder
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    results_dir = os.path.join('results', f'single_run_{timestamp}')
+    os.makedirs(results_dir, exist_ok=True)
     
+    # Save config
+    config_path = os.path.join(results_dir, 'config.json')
+    with open(config_path, 'w') as f:
+        json.dump({
+            "rocket": rocket_config,
+            "environment": env_config,
+            "simulation": sim_config
+        }, f, indent=2)
+    
+    # Save CSV
     import csv
-    filename = f'results/single_run_{timestamp}.csv'
+    filename = os.path.join(results_dir, 'single_run.csv')
     with open(filename, 'w', newline='') as f:
         writer = csv.writer(f)
         writer.writerow(['Time', 'X', 'Y', 'Z', 'VX', 'VY', 'VZ', 'QW', 'QX', 'QY', 'QZ', 'Mass'])
@@ -133,7 +205,9 @@ def run_single_simulation(config_file=None, sim_overrides=None):
                 history['mass'][i]
             ])
     
-    print(f"\nTrajectory saved to: {filename}")
+    print(f"\nResults saved to folder: {results_dir}")
+    print(f"Trajectory saved to: {filename}")
+    print(f"Configuration saved to: {config_path}")
     
     # Generate plots
     print("\nGenerating plots...")
@@ -172,7 +246,7 @@ def run_single_simulation(config_file=None, sim_overrides=None):
     axes[1, 1].grid(True)
     
     plt.tight_layout()
-    plot_file = f'results/trajectory_2d_{timestamp}.png'
+    plot_file = os.path.join(results_dir, 'trajectory_2d.png')
     plt.savefig(plot_file, dpi=150, bbox_inches='tight')
     print(f"2D plots saved to: {plot_file}")
     plt.close()
@@ -194,7 +268,7 @@ def run_single_simulation(config_file=None, sim_overrides=None):
     ax.set_title('3D Trajectory')
     ax.legend()
     
-    plot_file = f'results/trajectory_3d_{timestamp}.png'
+    plot_file = os.path.join(results_dir, 'trajectory_3d.png')
     plt.savefig(plot_file, dpi=150, bbox_inches='tight')
     print(f"3D plot saved to: {plot_file}")
     plt.close()
@@ -267,8 +341,8 @@ def run_optimization(config_file=None, sim_overrides=None):
     sim = SuicideBurnSimulation(rocket_config, env_config, sim_config)
     
     # Initial conditions
-    initial_altitude = 1000.0
-    initial_velocity = -50.0
+    initial_altitude = env_config.get('initial_altitude', 1000.0)
+    initial_velocity = env_config.get('initial_velocity', -50.0)
     
     initial_state = np.array([
         0, 0, initial_altitude,
@@ -310,19 +384,32 @@ def run_optimization(config_file=None, sim_overrides=None):
     print(f"Optimal ignition altitude: {optimal_altitude:.2f} m")
     print(f"Success rate at optimal altitude: {success_rates[optimal_altitude]*100:.1f}%")
     
-    # Save results
-    os.makedirs('results', exist_ok=True)
+    # Results folder
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    results_dir = os.path.join('results', f'optimization_{timestamp}')
+    os.makedirs(results_dir, exist_ok=True)
     
+    # Save config
+    config_path = os.path.join(results_dir, 'config.json')
+    with open(config_path, 'w') as f:
+        json.dump({
+            "rocket": rocket_config,
+            "environment": env_config,
+            "simulation": sim_config
+        }, f, indent=2)
+
+    # Save results CSV
     import csv
-    filename = f'results/optimization_{timestamp}.csv'
+    filename = os.path.join(results_dir, 'optimization.csv')
     with open(filename, 'w', newline='') as f:
         writer = csv.writer(f)
         writer.writerow(['Ignition Altitude (m)', 'Success Rate'])
         for altitude, rate in sorted(success_rates.items()):
             writer.writerow([altitude, rate])
     
-    print(f"\nOptimization results saved to: {filename}")
+    print(f"\nResults saved to folder: {results_dir}")
+    print(f"Optimization results saved to: {filename}")
+    print(f"Configuration saved to: {config_path}")
     
     # Generate plots
     print("\nGenerating plots...")
@@ -342,7 +429,7 @@ def run_optimization(config_file=None, sim_overrides=None):
     plt.grid(True)
     plt.legend()
     
-    plot_file = f'results/success_rate_{timestamp}.png'
+    plot_file = os.path.join(results_dir, 'success_rate.png')
     plt.savefig(plot_file, dpi=150, bbox_inches='tight')
     print(f"Success rate plot saved to: {plot_file}")
     plt.close()
@@ -379,7 +466,7 @@ def run_optimization(config_file=None, sim_overrides=None):
         axes[1, 1].grid(True)
         
         plt.tight_layout()
-        plot_file = f'results/best_trajectory_2d_{timestamp}.png'
+        plot_file = os.path.join(results_dir, 'best_trajectory_2d.png')
         plt.savefig(plot_file, dpi=150, bbox_inches='tight')
         print(f"Best trajectory 2D plots saved to: {plot_file}")
         plt.close()
@@ -390,6 +477,7 @@ def run_optimization(config_file=None, sim_overrides=None):
 
 
 def main():
+    print_banner()
     parser = argparse.ArgumentParser(description='Suicide Burn Flight Dynamics Simulation')
     parser.add_argument('--mode', choices=['single', 'optimize'], default='single',
                         help='Run mode: single simulation or optimization')
@@ -397,6 +485,14 @@ def main():
     parser.add_argument('--mc-runs', type=int, help='Monte Carlo runs per altitude (default: 100)')
     parser.add_argument('--search-range', type=float, help='Altitude search range in meters (default: 10.0)')
     parser.add_argument('--altitude-step', type=float, help='Altitude step size in meters (default: 0.1)')
+    
+    # New arguments
+    parser.add_argument('--ascent', action='store_true', help='Simulate full ascent phase')
+    parser.add_argument('--pitch', type=float, default=0.0, help='Initial Pitch (deg). If ascent, applies to launch. If descent only, applies to start.')
+    parser.add_argument('--yaw', type=float, default=0.0, help='Initial Yaw (deg)')
+    parser.add_argument('--roll', type=float, default=0.0, help='Initial Roll (deg)')
+    parser.add_argument('--ignition-percent-offset', type=float, default=0.0, help='Ignition altitude percent offset (%)')
+    parser.add_argument('--ignition-hard-offset', type=float, default=0.0, help='Ignition altitude hard offset (m)')
     
     args = parser.parse_args()
     
@@ -408,6 +504,23 @@ def main():
         sim_overrides['altitude_search_range'] = args.search_range
     if args.altitude_step is not None:
         sim_overrides['altitude_step'] = args.altitude_step
+    
+    sim_overrides['ignition_percent_offset'] = args.ignition_percent_offset / 100.0
+    sim_overrides['ignition_hard_offset'] = args.ignition_hard_offset
+        
+    # Handle Ascent/Orientation Logic
+    if args.ascent:
+        sim_overrides['simulate_ascent'] = True
+        sim_overrides['ascent_initial_pitch'] = args.pitch
+        sim_overrides['ascent_initial_yaw'] = args.yaw
+        sim_overrides['ascent_initial_roll'] = args.roll
+    elif args.pitch != 0.0 or args.yaw != 0.0 or args.roll != 0.0:
+        # If any orientation flag is provided but no --ascent, assume descent mode
+        sim_overrides['simulate_ascent'] = False
+        sim_overrides['descent_initial_pitch'] = args.pitch
+        sim_overrides['descent_initial_yaw'] = args.yaw
+        sim_overrides['descent_initial_roll'] = args.roll
+
     
     if args.mode == 'single':
         run_single_simulation(args.config, sim_overrides)

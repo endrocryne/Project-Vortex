@@ -1,0 +1,9 @@
+{
+    "results_dir": "C:\\Users\\rishi\\Documents\\Vortex\\Project-Vortex\\results",
+    "default_rocket_stl": "C:/Users/rishi/Downloads/ImageToStl.com_sketch-mockup.stl",
+    "flame_stl_path": "C:/Users/rishi/Downloads/rocket_flame_cm.stl",
+    "explosion_stl_path": "assets\\Dramatic_explosion_effect_part.stl",
+    "lat_scale": "10.0",
+    "scale_lat_enabled": true,
+    "playback_speed": "0.1x"
+}

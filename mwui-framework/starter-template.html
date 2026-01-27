@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UI Framework Starter</title>
+    <link rel="stylesheet" href="framework.css">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+</head>
+<body class="liquid-glass" data-theme="light">
+    <!-- Header -->
+    <div class="header">
+        <div class="title">My App</div>
+        <div class="controls">
+            <button id="settingsBtn">⚙️ Settings</button>
+        </div>
+    </div>
+
+    <!-- Tab Navigation -->
+    <div class="tabs">
+        <button class="tab-link active" onclick="openTab(event, 'tab1')">
+            <i class="material-icons">home</i> Tab 1
+        </button>
+        <button class="tab-link" onclick="openTab(event, 'tab2')">
+            <i class="material-icons">explore</i> Tab 2
+        </button>
+        <button class="tab-link" onclick="openTab(event, 'tab3')">
+            <i class="material-icons">settings</i> Tab 3
+        </button>
+    </div>
+
+    <!-- Tab Contents -->
+    <div id="tab1" class="tab-content" style="display: block;">
+        <h2>Welcome to Tab 1</h2>
+        <p>This is your first tab. Replace this content with your app's features.</p>
+    </div>
+
+    <div id="tab2" class="tab-content">
+        <h2>Tab 2</h2>
+        <p>Add your content here for the second tab.</p>
+    </div>
+
+    <div id="tab3" class="tab-content">
+        <h2>Tab 3</h2>
+        <p>Add your content here for the third tab.</p>
+    </div>
+
+    <!-- Settings Modal -->
+    <div class="modal" id="settingsModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title">Settings</div>
+                <button class="close-btn" id="closeSettings">&times;</button>
+            </div>
+
+            <div class="form-group">
+                <label for="themeSelect">Theme:</label>
+                <select id="themeSelect">
+                    <option value="light">Light</option>
+                    <option value="dark">Dark</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="styleSelect">Style:</label>
+                <select id="styleSelect">
+                    <option value="material3">Google Material 3</option>
+                    <option value="fluent">Microsoft Fluent Design</option>
+                    <option value="liquid-glass">Liquid Glass</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="accentColorInput">Accent Color:</label>
+                <input type="color" id="accentColorInput">
+            </div>
+
+            <div class="form-group">
+                <label for="fontSizeSlider">Font Size:</label>
+                <input type="range" id="fontSizeSlider" min="12" max="24" value="16">
+            </div>
+
+            <div class="form-group toggle-group">
+                <label for="highContrastToggle">High Contrast:</label>
+                <label class="switch">
+                    <input type="checkbox" id="highContrastToggle">
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <button id="saveSettings">Save Settings</button>
+            <label>Mishra WebUI Framwork v2.2</label>
+        </div>
+    </div>
+
+    <!-- Framework Scripts -->
+    <script src="framework.js"></script>
+    <script src="customizer.js"></script>
+    <script>
+        // Initialize the framework
+        const app = new UIFramework({
+            appName: 'My App',
+            defaultTheme: 'light',
+            defaultStyle: 'liquid-glass',
+            onTabChange: (tabName) => {
+                console.log('Tab changed to:', tabName);
+                // Add your custom tab change logic here
+            }
+        });
+
+        // Your custom app code goes here
+    </script>
+</body>
+</html>

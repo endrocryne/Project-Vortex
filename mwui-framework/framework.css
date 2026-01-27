@@ -1,0 +1,588 @@
+/**
+ * UI Framework Styles
+ * A reusable design system supporting Material 3, Fluent Design, and Liquid Glass aesthetics
+ * with comprehensive theming and customization options.
+ */
+
+/* ========================================
+   RESET AND BASE STYLES
+   ======================================== */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+/* ========================================
+   CSS VARIABLES - THEME SYSTEM
+   ======================================== */
+
+:root {
+    /* Primary Colors */
+    --primary: #1976d2;
+    --primary-variant: #1565c0;
+    --secondary: #03dac6;
+    
+    /* Background & Surface */
+    --background: #ffffff;
+    --surface: #f5f5f5;
+    
+    /* Status Colors */
+    --error: #b00020;
+    --success: #4caf50;
+    --warning: #ff9800;
+    
+    /* Text Colors */
+    --on-primary: #ffffff;
+    --on-secondary: #000000;
+    --on-background: #000000;
+    --on-surface: #000000;
+    
+    /* Effects */
+    --shadow: rgba(0, 0, 0, 0.12);
+    --border-radius: 8px;
+    --animation-duration: 0.3s;
+    --primary-rgb: 25, 118, 210;
+}
+
+/* Dark Theme */
+[data-theme="dark"] {
+    --primary: #bb86fc;
+    --primary-variant: #a05ff9;
+    --secondary: #03dac6;
+    --background: #121212;
+    --surface: #1e1e1e;
+    --error: #cf6679;
+    --on-primary: #000000;
+    --on-secondary: #000000;
+    --on-background: #ffffff;
+    --on-surface: #ffffff;
+    --shadow: rgba(255, 255, 255, 0.12);
+    --primary-rgb: 187, 134, 252;
+}
+
+/* High Contrast Theme */
+[data-theme="high-contrast"] {
+    --primary: #000000;
+    --primary-variant: #333333;
+    --secondary: #ffffff;
+    --background: #000000;
+    --surface: #1a1a1a;
+    --error: #ff0000;
+    --on-primary: #ffffff;
+    --on-secondary: #000000;
+    --on-background: #ffffff;
+    --on-surface: #ffffff;
+    --shadow: rgba(255, 255, 255, 0.2);
+}
+
+/* ========================================
+   DESIGN SYSTEM VARIANTS
+   ======================================== */
+
+/* Material 3 Design */
+.material3 {
+    --border-radius: 12px;
+    --animation-duration: 0.15s;
+}
+
+.material3 button {
+    border-radius: 20px;
+    padding: 12px 24px;
+    font-weight: 500;
+    text-transform: none;
+    box-shadow: 0 1px 3px var(--shadow);
+    transition: all var(--animation-duration) cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.material3 button:hover {
+    box-shadow: 0 2px 6px var(--shadow);
+    transform: translateY(-1px);
+}
+
+/* Material 3 specific - add outer spacing around tab buttons without increasing button size */
+.material3 .tab-link {
+    /* keep internal padding consistent with base to avoid increasing the button size */
+    padding: 1rem;
+    /* use margin to add spacing around the button (vertical horizontal) */
+    margin: 0.5rem 0.5rem;
+    border-radius: 20px;
+}
+
+/* Settings button when moved into the tab bar (liquid glass mode) */
+.tabs .settings-tab-btn {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    margin-left: auto; /* keep it pinned to the right */
+    background: transparent;
+    color: var(--on-surface);
+    border: none;
+}
+
+/* Ensure settings button matches hover behavior of tab links */
+.tabs .settings-tab-btn:hover {
+    background-color: rgba(0,0,0,0.04);
+}
+/* Optionally also allow the tabs container to use gap in Material 3 for better layout control */
+.material3 .tabs {
+    gap: 0.5rem;
+}
+
+/* Microsoft Fluent Design */
+.fluent {
+    --border-radius: 4px;
+    --animation-duration: 0s;
+}
+
+.fluent *,
+.fluent *::before,
+.fluent *::after {
+    transition-duration: 0s !important;
+    animation-duration: 0s !important;
+    animation-iteration-count: 1 !important;
+}
+
+.fluent button {
+    border-radius: 2px;
+    padding: 8px 16px;
+    font-weight: 400;
+    position: relative;
+    overflow: hidden;
+}
+
+.fluent button:hover {
+    background-color: var(--primary-variant);
+}
+
+/* Liquid Glass Design */
+.liquid-glass {
+    --border-radius: 16px;
+    --animation-duration: 0.6s;
+    --glass-blur: 8px;
+    --glass-opacity: 0.01;
+    --glass-border: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme="light"].liquid-glass {
+    --on-background: #000000;
+    --on-surface: #000000;
+}
+
+[data-theme="dark"].liquid-glass {
+    --on-background: #ffffff;
+    --on-surface: #ffffff;
+}
+
+.liquid-glass button {
+    border-radius: 50px;
+    padding: 12px 24px;
+    background: linear-gradient(135deg, rgba(255, 255, 255, var(--glass-opacity)) 0%, rgba(255, 255, 255, 0.02) 100%);
+    backdrop-filter: blur(var(--glass-blur)) saturate(1.8);
+    border: 0.5px solid var(--glass-border);
+    position: relative;
+    overflow: hidden;
+    transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    color: var(--on-surface);
+    /* Add subtle elevated shadow so edges remain visible in light/dim backgrounds */
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.12), 0 4px 10px rgba(0, 0, 0, 0.06);
+}
+
+.liquid-glass button::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, transparent 50%, rgba(255, 255, 255, 0.05) 100%);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.liquid-glass button:hover {
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.15) 0%, rgba(255, 255, 255, 0.05) 100%);
+    transform: scale(1.02) translateY(-1px);
+    box-shadow: 0 22px 50px rgba(0, 0, 0, 0.14), 0 8px 20px rgba(0, 0, 0, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    border-color: rgba(255, 255, 255, 0.25);
+}
+
+.liquid-glass button:hover::before {
+    opacity: 1;
+}
+
+.liquid-glass button:active {
+    transform: scale(0.98) translateY(0);
+    transition: all 0.1s ease;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.10);
+}
+
+/* Add subtle elevation to common container surfaces so their edges are visible */
+.liquid-glass .modal-content,
+.liquid-glass .tab-content,
+.liquid-glass .history-item,
+.liquid-glass .lap-item,
+.liquid-glass .form-group,
+.liquid-glass .controls,
+.liquid-glass .title {
+    box-shadow: 0 18px 36px rgba(0, 0, 0, 0.06), 0 6px 12px rgba(0, 0, 0, 0.04);
+    border-radius: var(--border-radius);
+}
+
+/* Slightly stronger contrast for dark theme so edges remain clear there as well */
+[data-theme="dark"].liquid-glass .modal-content,
+[data-theme="dark"].liquid-glass .tab-content,
+[data-theme="dark"].liquid-glass .history-item,
+[data-theme="dark"].liquid-glass .lap-item,
+[data-theme="dark"].liquid-glass .form-group,
+[data-theme="dark"].liquid-glass .controls,
+[data-theme="dark"].liquid-glass .title {
+    box-shadow: 0 14px 30px rgba(0, 0, 0, 0.22), 0 4px 10px rgba(255, 255, 255, 0.02);
+}
+
+/* Settings modal buttons should be flat (no elevated shadow) so controls remain crisp */
+.liquid-glass #settingsModal button,
+.liquid-glass #settingsModal button:hover,
+.liquid-glass #settingsModal button:active,
+[data-theme="dark"].liquid-glass #settingsModal button,
+[data-theme="dark"].liquid-glass #settingsModal button:hover,
+[data-theme="dark"].liquid-glass #settingsModal button:active {
+    box-shadow: none !important;
+}
+
+/* ========================================
+   LAYOUT COMPONENTS
+   ======================================== */
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: var(--background);
+    color: var(--on-background);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    transition: background-color var(--animation-duration) ease, color var(--animation-duration) ease;
+}
+
+/* Header */
+.header {
+    background-color: var(--primary);
+    color: var(--on-primary);
+    padding: 1rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: 0 2px 4px var(--shadow);
+    flex-shrink: 0;
+    transition: background-color var(--animation-duration) ease;
+}
+
+.title {
+    font-size: 1.5rem;
+    font-weight: 600;
+}
+
+.controls {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+}
+
+/* Tab Navigation */
+.tabs {
+    display: flex;
+    background-color: var(--surface);
+    border-bottom: 1px solid var(--shadow);
+}
+
+.tab-link {
+    background-color: transparent;
+    border: none;
+    padding: 1rem;
+    cursor: pointer;
+    font-size: 1rem;
+    color: var(--on-surface);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.tab-link.active {
+    background-color: var(--primary);
+    color: var(--on-primary);
+}
+
+.tab-content {
+    padding: 1rem;
+    flex: 1;
+    overflow-y: auto;
+}
+
+/* ========================================
+   BUTTONS
+   ======================================== */
+
+button {
+    background-color: var(--primary);
+    color: var(--on-primary);
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: var(--border-radius);
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: all var(--animation-duration) ease;
+}
+
+button:hover {
+    background-color: var(--primary-variant);
+}
+
+button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* ========================================
+   MODAL SYSTEM
+   ======================================== */
+
+.modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+}
+
+.modal-content {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background-color: var(--surface);
+    padding: 2rem;
+    border-radius: var(--border-radius);
+    width: 90%;
+    max-width: 500px;
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.modal-title {
+    font-size: 1.2rem;
+    font-weight: 600;
+}
+
+.close-btn {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    color: var(--on-surface);
+}
+
+/* ========================================
+   FORM ELEMENTS
+   ======================================== */
+
+.form-group {
+    margin-bottom: 1rem;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+}
+
+.form-group input,
+.form-group select,
+.form-group textarea {
+    width: 100%;
+    padding: 0.75rem;
+    border: 1px solid var(--shadow);
+    border-radius: var(--border-radius);
+    background-color: var(--background);
+    color: var(--on-background);
+}
+
+.form-group.toggle-group {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+/* Toggle Switch */
+.switch {
+    position: relative;
+    display: inline-block;
+    width: 50px;
+    height: 28px;
+}
+
+.switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #ccc;
+    transition: var(--animation-duration);
+    border-radius: 28px;
+}
+
+.slider:before {
+    position: absolute;
+    content: "";
+    height: 20px;
+    width: 20px;
+    left: 4px;
+    bottom: 4px;
+    background-color: white;
+    transition: var(--animation-duration);
+    border-radius: 50%;
+}
+
+input:checked + .slider {
+    background-color: var(--primary);
+}
+
+input:focus + .slider {
+    box-shadow: 0 0 1px var(--primary);
+}
+
+input:checked + .slider:before {
+    transform: translateX(22px);
+}
+
+/* ========================================
+   LIQUID GLASS SPECIFIC LAYOUTS
+   ======================================== */
+
+/* Liquid Glass Header */
+body.liquid-glass .header {
+    opacity: 0;
+    height: 0;
+    padding: 0;
+    margin: 0;
+    pointer-events: none;
+    overflow: visible;
+    transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+/* Liquid Glass Settings Button (Floating) */
+body.liquid-glass #settingsBtn {
+    position: fixed;
+    top: 12px;
+    right: 12px;
+    z-index: 2100;
+    pointer-events: auto;
+    border-radius: 50%;
+    padding: 10px 12px;
+    min-width: 44px;
+    min-height: 44px;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02));
+    backdrop-filter: blur(var(--glass-blur)) saturate(1.8);
+    border: 0.5px solid var(--glass-border);
+    box-shadow: 0 8px 24px rgba(var(--primary-rgb), 0.12);
+    color: var(--on-surface);
+}
+
+/* Liquid Glass Tab Bar (Bottom Floating) */
+body.liquid-glass .tabs {
+    position: fixed;
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 2000;
+    display: flex;
+    gap: 0.5rem;
+    padding: 6px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.01));
+    backdrop-filter: blur(var(--glass-blur)) saturate(1.6);
+    border-radius: 999px;
+    border: 0.5px solid var(--glass-border);
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.12);
+}
+
+body.liquid-glass .tab-link {
+    background: transparent;
+    padding: 0.5rem 0.75rem;
+    border-radius: 999px;
+}
+
+body.liquid-glass .tab-link.active {
+    background: rgba(var(--primary-rgb), 0.12);
+    color: var(--on-surface);
+}
+
+body.liquid-glass .tab-content {
+    padding-bottom: 4.5rem;
+}
+
+body.liquid-glass .tabs .settings-tab-btn {
+    position: relative !important;
+    top: auto !important;
+    right: auto !important;
+    border-radius: 999px;
+    padding: 0.5rem 0.75rem;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    color: var(--on-surface);
+}
+
+body.liquid-glass .tabs .settings-tab-btn:hover {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+/* ========================================
+   RESPONSIVE DESIGN
+   ======================================== */
+
+@media (max-width: 768px) {
+    .title {
+        font-size: 1.2rem;
+    }
+
+    .tab-link {
+        padding: 0.75rem;
+        font-size: 0.9rem;
+    }
+
+    .modal-content {
+        width: 95%;
+        padding: 1.5rem;
+    }
+}
+
+@media (max-width: 480px) {
+    .header {
+        padding: 0.75rem;
+    }
+
+    .tab-link {
+        padding: 0.5rem;
+    }
+
+    button {
+        padding: 0.4rem 0.8rem;
+        font-size: 0.85rem;
+    }
+}

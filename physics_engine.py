@@ -134,3 +134,22 @@ class PhysicsEngine:
         if norm < 1e-10:
             return np.array([1.0, 0.0, 0.0, 0.0])
         return q / norm
+        
+    def euler_to_quaternion(self, roll, pitch, yaw):
+        """
+        Convert Euler angles (in radians) to quaternion [w, x, y, z]
+        Order: Z (yaw) -> Y (pitch) -> X (roll) intrinsic rotations
+        """
+        cr = np.cos(roll * 0.5)
+        sr = np.sin(roll * 0.5)
+        cp = np.cos(pitch * 0.5)
+        sp = np.sin(pitch * 0.5)
+        cy = np.cos(yaw * 0.5)
+        sy = np.sin(yaw * 0.5)
+
+        w = cr * cp * cy + sr * sp * sy
+        x = sr * cp * cy - cr * sp * sy
+        y = cr * sp * cy + sr * cp * sy
+        z = cr * cp * sy - sr * sp * cy
+
+        return self.normalize_quaternion(np.array([w, x, y, z]))

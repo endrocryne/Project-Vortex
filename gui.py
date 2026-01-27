@@ -27,8 +27,35 @@ class SimulationGUI:
     
     def __init__(self, root):
         self.root = root
-        self.root.title("Suicide Burn Simulation - Project Vortex")
-        self.root.geometry("900x800")
+        self.root.title("HexaKinetic Simulation - Vortex Desktop")
+        self.root.geometry("1000x900") # Slightly larger to accommodate banner
+        
+        # Set Icon
+        try:
+            icon_path = os.path.join(os.path.dirname(__file__), 'assets', 'hexakinetic_icon.png')
+            if os.path.exists(icon_path):
+                self.icon_img = tk.PhotoImage(file=icon_path)
+                self.root.iconphoto(False, self.icon_img)
+                # Fix taskbar icon on Windows
+                import ctypes
+                myappid = 'vortex.hexakinetic.gui.v0.4'
+                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+        except Exception:
+            pass
+        
+        # Menu Bar
+        self.create_menu()
+        
+        # Banner Frame (Top)
+        self.banner_frame = tk.Frame(root, bg="#d9534f", pady=5)
+        self.banner_label = tk.Label(self.banner_frame, text=" Warning from [Mishra Physics Engine]: Current configuration is impossible and cannot land.", 
+                                     fg="white", bg="#d9534f", font=("Arial", 11, "bold"))
+        self.banner_label.pack(side='left', expand=True, padx=(20, 0))
+        self.btn_dismiss_banner = tk.Button(self.banner_frame, text="Dismiss", 
+                                            command=self.dismiss_banner, bg="#d9534f", fg="white", 
+                                            relief='flat', font=("Arial", 9, "bold"), cursor="hand2")
+        self.btn_dismiss_banner.pack(side='right', padx=10)
+        self.banner_frame.pack_forget() # Hidden by default
         
         # Create notebook for tabs
         self.notebook = ttk.Notebook(root)
@@ -46,9 +73,137 @@ class SimulationGUI:
         self.status_bar = tk.Label(root, text="Ready", bd=1, relief=tk.SUNKEN, anchor=tk.W)
         self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
         
-        # Simulation object
+        # State
         self.simulation = None
         self.running = False
+        self.banner_dismissed_manually = False
+        self.last_feasibility_state = True # True = Possible
+        self.last_result_csv = None # Track the latest result CSV for HexaVisual
+        
+        # Setup continuous monitoring
+        self.setup_monitoring()
+
+    def create_menu(self):
+        """Create the top menu bar"""
+        menubar = tk.Menu(self.root)
+        self.root.config(menu=menubar)
+        
+        # File Menu
+        file_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="File", menu=file_menu)
+        file_menu.add_command(label="Load Config", command=self.load_config)
+        file_menu.add_command(label="Save Config", command=self.save_config)
+        file_menu.add_separator()
+        file_menu.add_command(label="Preferences", command=self.open_preferences)
+        file_menu.add_separator()
+        file_menu.add_command(label="About", command=self.open_about)
+        file_menu.add_separator()
+        file_menu.add_command(label="Quit App", command=self.root.quit)
+        
+        # Edit Menu
+        edit_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Edit", menu=edit_menu)
+        edit_menu.add_command(label="Preferences", command=self.open_preferences)
+        edit_menu.add_separator()
+        edit_menu.add_command(label="HexaVisual", command=self.launch_hexavisual)
+        
+        # View Menu
+        view_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="View", menu=view_menu)
+        view_menu.add_command(label="Zoom In", command=lambda: self.log("Zoom In (Placeholder)"))
+        view_menu.add_command(label="Zoom Out", command=lambda: self.log("Zoom Out (Placeholder)"))
+        view_menu.add_command(label="Fit to Screen", command=lambda: self.log("Fit to Screen (Placeholder)"))
+
+    def open_preferences(self):
+        """Open Preferences window"""
+        top = tk.Toplevel(self.root)
+        top.title("Preferences")
+        top.geometry("400x300")
+        
+        ttk.Label(top, text="Results Directory:", font=("Arial", 10, "bold")).pack(anchor='w', padx=10, pady=(10,5))
+        
+        dir_frame = ttk.Frame(top)
+        dir_frame.pack(fill='x', padx=10)
+        self.res_dir_var = tk.StringVar(value=os.path.join(os.getcwd(), 'results'))
+        ttk.Entry(dir_frame, textvariable=self.res_dir_var).pack(side='left', fill='x', expand=True)
+        ttk.Button(dir_frame, text="Browse", command=lambda: self.res_dir_var.set(filedialog.askdirectory())).pack(side='right', padx=5)
+        
+        ttk.Label(top, text="Plots to Save:", font=("Arial", 10, "bold")).pack(anchor='w', padx=10, pady=(15,5))
+        
+        self.chk_save_3d = tk.BooleanVar(value=True)
+        self.chk_save_2d = tk.BooleanVar(value=True)
+        self.chk_save_vel = tk.BooleanVar(value=True)
+        
+        ttk.Checkbutton(top, text="3D Trajectory", variable=self.chk_save_3d).pack(anchor='w', padx=20)
+        ttk.Checkbutton(top, text="2D Altitude/Time", variable=self.chk_save_2d).pack(anchor='w', padx=20)
+        ttk.Checkbutton(top, text="Velocity Profiles", variable=self.chk_save_vel).pack(anchor='w', padx=20)
+        
+        ttk.Button(top, text="Close", command=top.destroy).pack(pady=20)
+
+    def open_about(self):
+        """Open About window"""
+        messagebox.showinfo("About", "HexaKinetic Simulation\nVersion 0.4\n\nThis software is part of the Vortex Desktop package. Powered by Python. \n\nPowered by Mishra Physics Engine\n\n©️ 2026 Agastya Mishra")
+
+    def launch_hexavisual(self):
+        """Launch the Advanced Visualizer (HexaVisual)"""
+        import subprocess
+        try:
+            # Use same python executable
+            import sys
+            subprocess.Popen([sys.executable, "advanced_visualizer.py"])
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to launch HexaVisual: {e}")
+
+    def setup_monitoring(self):
+        """Setup traces and timers to monitor config changes"""
+        # Traces for numeric variables
+        vars_to_trace = [
+            self.dry_mass, self.propellant_mass, self.gravity,
+            self.initial_altitude, self.initial_velocity
+        ]
+        for v in vars_to_trace:
+            v.trace_add("write", lambda *args: self.root.after(100, self.check_live_feasibility))
+            
+        # Periodic check for text-based controls (thrust curve)
+        self.periodic_check()
+
+    def periodic_check(self):
+        """Check things that don't have built-in traces every second"""
+        self.check_live_feasibility()
+        self.root.after(1000, self.periodic_check)
+
+    def dismiss_banner(self):
+        """Manually hide the banner until next restart"""
+        self.banner_dismissed_manually = True
+        self.banner_frame.pack_forget()
+
+    def check_live_feasibility(self):
+        """Non-blocking feasibility check for the UI banner"""
+        try:
+            # Lightweight check
+            rocket_config, env_config, sim_config = self.get_configs()
+            sim = SuicideBurnSimulation(rocket_config, env_config, sim_config)
+            
+            initial_v = self.initial_velocity.get()
+            initial_h = self.initial_altitude.get()
+            
+            is_possible, r = sim.check_feasibility(initial_v, initial_h)
+            
+            if is_possible:
+                # If it became possible, we reset manual dismissal
+                if not self.last_feasibility_state: 
+                    self.banner_dismissed_manually = False
+                self.banner_frame.pack_forget()
+            else:
+                # Show banner if not manually dismissed
+                if not self.banner_dismissed_manually:
+                    self.banner_frame.pack(side='top', fill='x', before=self.notebook)
+            
+            self.last_feasibility_state = is_possible
+            
+        except Exception:
+            # Silence errors during live typing/parsing
+            pass
         
     def create_rocket_tab(self):
         """Create rocket configuration tab"""
@@ -79,6 +234,12 @@ class SimulationGUI:
         ttk.Label(frame, text="Propellant Mass (kg):").grid(row=1, column=0, sticky='w')
         self.propellant_mass = tk.DoubleVar(value=10.0)
         ttk.Entry(frame, textvariable=self.propellant_mass).grid(row=1, column=1)
+        
+        # Ascent Motor (New)
+        ttk.Label(frame, text="Ascent Motor Dry Mass (kg):", font=("Arial", 9)).grid(row=2, column=0, sticky='w')
+        self.ascent_motor_casing_mass = tk.DoubleVar(value=2.0)
+        ttk.Entry(frame, textvariable=self.ascent_motor_casing_mass).grid(row=2, column=1)
+        ttk.Label(frame, text="(Only used if 'Simulate Ascent' is checked)", font=("Arial", 8, "italic"), foreground="gray").grid(row=3, column=0, columnspan=2, sticky='w', padx=10)
         
         # Geometry
         frame = ttk.LabelFrame(scrollable_frame, text="Geometry", padding=10)
@@ -243,9 +404,41 @@ class SimulationGUI:
         self.altitude_step = tk.DoubleVar(value=0.1)
         ttk.Entry(frame, textvariable=self.altitude_step).grid(row=2, column=1)
 
+        ttk.Label(frame, text="Ignition Percent Offset (%):").grid(row=3, column=0, sticky='w')
+        self.ignition_percent_offset = tk.DoubleVar(value=0.0)
+        ttk.Entry(frame, textvariable=self.ignition_percent_offset).grid(row=3, column=1)
+
+        ttk.Label(frame, text="Ignition Hard Offset (m):").grid(row=4, column=0, sticky='w')
+        self.ignition_hard_offset = tk.DoubleVar(value=0.0)
+        ttk.Entry(frame, textvariable=self.ignition_hard_offset).grid(row=4, column=1)
+
+        # Ascent & Orientation
+        frame_ascent = ttk.LabelFrame(tab, text="Flight Phase & Orientation", padding=10)
+        frame_ascent.pack(fill='x', padx=5, pady=5)
+        
+        self.simulate_ascent = tk.BooleanVar(value=False)
+        self.chk_ascent = ttk.Checkbutton(frame_ascent, text="Simulate Ascent Phase (Launch -> Apogee -> Descent)", 
+                                          variable=self.simulate_ascent, command=self.update_orientation_labels)
+        self.chk_ascent.grid(row=0, column=0, columnspan=2, sticky='w', pady=(0, 10))
+        
+        self.lbl_orientation = ttk.Label(frame_ascent, text="Burn Start Orientation (deg):", font=("Arial", 9, "bold"))
+        self.lbl_orientation.grid(row=1, column=0, columnspan=2, sticky='w')
+        
+        ttk.Label(frame_ascent, text="Pitch (deg):").grid(row=2, column=0, sticky='w')
+        self.start_pitch = tk.DoubleVar(value=0.0)
+        ttk.Entry(frame_ascent, textvariable=self.start_pitch).grid(row=2, column=1, sticky='w')
+        
+        ttk.Label(frame_ascent, text="Yaw (deg):").grid(row=3, column=0, sticky='w')
+        self.start_yaw = tk.DoubleVar(value=0.0)
+        ttk.Entry(frame_ascent, textvariable=self.start_yaw).grid(row=3, column=1, sticky='w')
+        
+        ttk.Label(frame_ascent, text="Roll (deg):").grid(row=4, column=0, sticky='w')
+        self.start_roll = tk.DoubleVar(value=0.0)
+        ttk.Entry(frame_ascent, textvariable=self.start_roll).grid(row=4, column=1, sticky='w')
+
         # Toggle to show plots after run
         self.show_plots = tk.BooleanVar(value=False)
-        ttk.Checkbutton(frame, text="Show plots after run", variable=self.show_plots).grid(row=3, column=0, columnspan=2, sticky='w', pady=(5,0))
+        ttk.Checkbutton(frame, text="Show plots after run", variable=self.show_plots).grid(row=5, column=0, columnspan=2, sticky='w', pady=(5,0))
         
         # Variation parameters
         frame = ttk.LabelFrame(tab, text="Monte Carlo Variations", padding=10)
@@ -294,6 +487,9 @@ class SimulationGUI:
         
         ttk.Button(button_frame, text="Run Single Simulation", 
                   command=self.run_single).pack(side='left', padx=5)
+
+        ttk.Button(button_frame, text="Check Feasibility", 
+                  command=self.check_feasibility).pack(side='left', padx=5)
         
         ttk.Button(button_frame, text="Save Configuration", 
                   command=self.save_config).pack(side='left', padx=5)
@@ -321,6 +517,36 @@ class SimulationGUI:
         scrollbar.pack(side='right', fill='y')
         self.output_text.config(yscrollcommand=scrollbar.set)
 
+    def check_feasibility(self):
+        """Check if landing is physically possible"""
+        try:
+            # Get configurations
+            rocket_config, environment_config, simulation_config = self.get_configs()
+            
+            # Create simulation (lightweight)
+            sim = SuicideBurnSimulation(rocket_config, environment_config, simulation_config)
+            
+            initial_velocity = self.initial_velocity.get()
+            initial_altitude = self.initial_altitude.get()
+            
+            is_possible, r = sim.check_feasibility(initial_velocity, initial_altitude)
+            
+            msg = f"Feasibility: {'POSSIBLE' if is_possible else 'IMPOSSIBLE'}\n\n"
+            msg += f"Initial Impact Speed (Unpowered): {r['v_impact_unpowered']:.1f} m/s\n"
+            msg += f"Delta-V Capacity (Gravity Losses Included): {r['dv_capacity']:.1f} m/s\n"
+            msg += f"  - Gross Delta-V: {r['dv_gross']:.1f} m/s\n"
+            msg += f"  - Gravity Loss: {r['dv_gravity_loss']:.1f} m/s\n\n"
+            msg += f"Margin (Capacity - Impact): {r['margin']:.1f} m/s\n\n"
+            msg += f"Max TWR (at burnout): {r['max_twr']:.2f}"
+            
+            if is_possible:
+                messagebox.showinfo("Feasibility Report", msg)
+            else:
+                messagebox.showwarning("Feasibility Report", msg)
+                
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
     def create_plots_tab(self):
         """Create Plots tab to embed interactive matplotlib canvases"""
         tab = ttk.Frame(self.notebook)
@@ -331,6 +557,7 @@ class SimulationGUI:
         control_frame.pack(fill='x', padx=5, pady=5)
 
         ttk.Button(control_frame, text="Clear Plots", command=self._clear_plots).pack(side='left')
+        ttk.Button(control_frame, text="View in HexaVisual", command=self.launch_hexavisual_with_data).pack(side='left', padx=5)
         ttk.Label(control_frame, text="  Interactive plots appear here after a run").pack(side='left', padx=10)
 
         # Frame where figures will be embedded
@@ -408,6 +635,7 @@ class SimulationGUI:
             'thrust_variation': self.thrust_variation.get(),
             'tvc_response_variation': self.tvc_response_variation.get(),
             'mass_variation': self.mass_variation.get(),
+            'ascent_motor_casing_mass': self.ascent_motor_casing_mass.get(),
         }
         
         environment_config = {
@@ -421,18 +649,41 @@ class SimulationGUI:
             'wind_direction': self.wind_direction.get(),
             'drag_variation': self.drag_variation.get(),
             'air_density_variation': self.air_density_variation.get(),
+            'initial_altitude': self.initial_altitude.get(),
+            'initial_velocity': self.initial_velocity.get(),
         }
         
-        simulation_config = {
+        sim_config = {
             'num_monte_carlo': self.num_monte_carlo.get(),
             'altitude_search_range': self.altitude_search_range.get(),
             'altitude_step': self.altitude_step.get(),
             'altimeter_error': self.altimeter_error.get(),
             'velocity_sensor_error': self.velocity_sensor_error.get(),
+            'ignition_percent_offset': self.ignition_percent_offset.get() / 100.0,
+            'ignition_hard_offset': self.ignition_hard_offset.get(),
             'show_plots': self.show_plots.get(),
+            'simulate_ascent': self.simulate_ascent.get(),
         }
         
-        return rocket_config, environment_config, simulation_config
+        # Map GUI orientation fields to correct config based on mode
+        if self.simulate_ascent.get():
+            sim_config['ascent_initial_pitch'] = self.start_pitch.get()
+            sim_config['ascent_initial_yaw'] = self.start_yaw.get()
+            sim_config['ascent_initial_roll'] = self.start_roll.get()
+            # Zero out descent ones or leave default? It doesn't matter, logic uses ascent->apogee->descent
+        else:
+            sim_config['descent_initial_pitch'] = self.start_pitch.get()
+            sim_config['descent_initial_yaw'] = self.start_yaw.get()
+            sim_config['descent_initial_roll'] = self.start_roll.get()
+        
+        return rocket_config, environment_config, sim_config
+        
+    def update_orientation_labels(self):
+        """Update labels based on ascent checkbox"""
+        if self.simulate_ascent.get():
+            self.lbl_orientation.config(text="Launch Pad Orientation (deg):")
+        else:
+            self.lbl_orientation.config(text="Burn Start Orientation (deg):")
     
     def log(self, message):
         """Log message to output text widget"""
@@ -512,6 +763,9 @@ class SimulationGUI:
             # Create results folder up-front so per-trial outputs can be written during optimization
             results_folder, ts = self._make_results_subfolder('optimization')
 
+            # Save the configuration for the entire optimization run
+            self._save_config_to_folder(results_folder)
+
             # Run optimization (pass GUI progress callback), save per-trial CSVs and PNGs
             optimal_altitude, success_rates, best_history = self.simulation.optimize_ignition_altitude(
                 initial_state,
@@ -532,6 +786,9 @@ class SimulationGUI:
             # Generate plots (overall) into the same folder
             self.generate_plots(success_rates, best_history, results_folder)
             
+            # Track the latest best trajectory for HexaVisual
+            self.last_result_csv = os.path.join(results_folder, 'trajectory.csv')
+            
             self.log("\nOptimization complete! Check the 'results' directory for outputs.")
             self.status_bar.config(text="Optimization complete")
             
@@ -549,7 +806,10 @@ class SimulationGUI:
         """Run a single simulation"""
         try:
             self.output_text.delete('1.0', 'end')
+            self.log("Note: Your HexaKinetic window will be unresponsive for the duration of the simulation.")
             self.log("Running single simulation...")
+            self.status_bar.config(text="Running single simulation")
+
             
             # Get configurations
             rocket_config, environment_config, simulation_config = self.get_configs()
@@ -571,17 +831,16 @@ class SimulationGUI:
                 rocket_config['dry_mass'] + rocket_config['propellant_mass']
             ])
             
-            # Calculate ignition altitude
-            ignition_altitude = self.simulation.calculate_ignition_altitude(
-                initial_velocity, initial_altitude
-            )
-            
-            self.log(f"Calculated ignition altitude: {ignition_altitude:.2f} m")
-            
             # Run simulation
+            # Passing ignition_altitude=None allows the simulation to calculate it 
+            # dynamically based on apogee if simulate_ascent is True.
             success, final_state, history = self.simulation.run_simulation(
-                initial_state, ignition_altitude
+                initial_state, None
             )
+            
+            # Ignition altitude used (can be retrieved from history)
+            actual_ignition_altitude = history.get('ignition_altitude', 0.0)
+            self.log(f"Calculated ignition altitude: {actual_ignition_altitude:.2f} m")
             
             self.log(f"Success: {success}")
             self.log(f"Final altitude: {history['final_altitude']:.2f} m")
@@ -589,6 +848,8 @@ class SimulationGUI:
             
             # Save and plot
             results_folder = self.save_single_result(history)
+            self._save_config_to_folder(results_folder)
+            self.last_result_csv = os.path.join(results_folder, 'single_run.csv')
             self.generate_single_plots(history, results_folder)
             
             self.log("\nSimulation complete! Check the 'results' directory.")
@@ -605,6 +866,23 @@ class SimulationGUI:
         folder = os.path.join('results', f'{prefix}_{timestamp}')
         os.makedirs(folder, exist_ok=True)
         return folder, timestamp
+
+    def _save_config_to_folder(self, folder):
+        """Save current GUI configuration to a JSON file in the specified folder"""
+        try:
+            import json
+            rocket_config, env_config, sim_config = self.get_configs()
+            full_config = {
+                "rocket": rocket_config,
+                "environment": env_config,
+                "simulation": sim_config
+            }
+            config_path = os.path.join(folder, 'config.json')
+            with open(config_path, 'w') as f:
+                json.dump(full_config, f, indent=2)
+            self.log(f"Saved configuration to {config_path}")
+        except Exception as e:
+            self.log(f"Warning: Could not save configuration to folder: {e}")
 
     def save_results(self, success_rates, history, folder=None):
         """Save optimization results to CSV inside a timestamped subfolder
@@ -977,24 +1255,125 @@ class SimulationGUI:
         except Exception as e:
             self.log(f"Error embedding interactive plots: {e}")
 
+    def launch_hexavisual_with_data(self):
+        """Launch HexaVisual with the current run's data"""
+        if not self.last_result_csv:
+            messagebox.showwarning("Warning", "No simulation result available. Run a simulation first.")
+            return
+        
+        import subprocess
+        import sys
+        try:
+            # Launch advanced_visualizer.py with the CSV path as an argument
+            subprocess.Popen([sys.executable, "advanced_visualizer.py", self.last_result_csv])
+            self.log(f"Launched HexaVisual with: {self.last_result_csv}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to launch HexaVisual: {e}")
+
     def save_config(self):
-        """Save configuration to file"""
+        """Save configuration to JSON file (compatible with CLI)"""
         filename = filedialog.asksaveasfilename(
-            defaultextension=".txt",
-            filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
         )
         if filename:
-            # TODO: Implement config save
-            messagebox.showinfo("Info", "Configuration save not yet implemented")
+            try:
+                import json
+                rocket_config, env_config, sim_config = self.get_configs()
+                
+                # Combine into one interchangeable config
+                full_config = {
+                    "rocket": rocket_config,
+                    "environment": env_config,
+                    "simulation": sim_config
+                }
+                
+                with open(filename, 'w') as f:
+                    json.dump(full_config, f, indent=2)
+                
+                messagebox.showinfo("Success", f"Configuration saved to {filename}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to save config: {e}")
             
     def load_config(self):
-        """Load configuration from file"""
+        """Load configuration from JSON file (compatible with CLI)"""
         filename = filedialog.askopenfilename(
-            filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
         )
         if filename:
-            # TODO: Implement config load
-            messagebox.showinfo("Info", "Configuration load not yet implemented")
+            try:
+                import json
+                with open(filename, 'r') as f:
+                    config = json.load(f)
+                
+                rocket = config.get('rocket', {})
+                env = config.get('environment', {})
+                sim = config.get('simulation', {})
+                
+                # Update Rocket parameters
+                if 'dry_mass' in rocket: self.dry_mass.set(rocket['dry_mass'])
+                if 'propellant_mass' in rocket: self.propellant_mass.set(rocket['propellant_mass'])
+                if 'ascent_motor_casing_mass' in rocket: self.ascent_motor_casing_mass.set(rocket['ascent_motor_casing_mass'])
+                if 'length' in rocket: self.length.set(rocket['length'])
+                if 'diameter' in rocket: self.diameter.set(rocket['diameter'])
+                if 'use_dynamic_inertia' in rocket: self.use_dynamic_inertia.set(rocket['use_dynamic_inertia'])
+                if 'burn_time' in rocket: self.burn_time.set(rocket['burn_time'])
+                if 'tvc_max_angle' in rocket: self.tvc_max_angle.set(rocket['tvc_max_angle'])
+                if 'tvc_response_time' in rocket: self.tvc_response_time.set(rocket['tvc_response_time'])
+                if 'tvc_kp_pitch' in rocket: self.tvc_kp_pitch.set(rocket['tvc_kp_pitch'])
+                if 'tvc_ki_pitch' in rocket: self.tvc_ki_pitch.set(rocket['tvc_ki_pitch'])
+                if 'tvc_kd_pitch' in rocket: self.tvc_kd_pitch.set(rocket['tvc_kd_pitch'])
+                if 'tvc_kp_yaw' in rocket: self.tvc_kp_yaw.set(rocket['tvc_kp_yaw'])
+                if 'tvc_ki_yaw' in rocket: self.tvc_ki_yaw.set(rocket['tvc_ki_yaw'])
+                if 'tvc_kd_yaw' in rocket: self.tvc_kd_yaw.set(rocket['tvc_kd_yaw'])
+                if 'thrust_variation' in rocket: self.thrust_variation.set(rocket['thrust_variation'])
+                if 'tvc_response_variation' in rocket: self.tvc_response_variation.set(rocket['tvc_response_variation'])
+                if 'mass_variation' in rocket: self.mass_variation.set(rocket['mass_variation'])
+                
+                if 'thrust_curve' in rocket:
+                    self.thrust_curve.delete('1.0', 'end')
+                    curve_str = "\n".join([f"{t},{T}" for t, T in rocket['thrust_curve']])
+                    self.thrust_curve.insert('1.0', curve_str)
+                
+                # Update Environment parameters
+                if 'gravity' in env: self.gravity.set(env['gravity'])
+                if 'air_density' in env: self.air_density.set(env['air_density'])
+                if 'temperature' in env: self.temperature.set(env['temperature'])
+                if 'drag_coefficient' in env: self.drag_coefficient.set(env['drag_coefficient'])
+                if 'wind_model' in env: self.wind_model.set(env['wind_model'])
+                if 'wind_speed' in env: self.wind_speed.set(env['wind_speed'])
+                if 'wind_direction' in env: self.wind_direction.set(env['wind_direction'])
+                if 'drag_variation' in env: self.drag_variation.set(env['drag_variation'])
+                if 'air_density_variation' in env: self.air_density_variation.set(env['air_density_variation'])
+                if 'initial_altitude' in env: self.initial_altitude.set(env['initial_altitude'])
+                if 'initial_velocity' in env: self.initial_velocity.set(env['initial_velocity'])
+                
+                # Update Simulation parameters
+                if 'num_monte_carlo' in sim: self.num_monte_carlo.set(sim['num_monte_carlo'])
+                if 'altitude_search_range' in sim: self.altitude_search_range.set(sim['altitude_search_range'])
+                if 'altitude_step' in sim: self.altitude_step.set(sim['altitude_step'])
+                if 'altimeter_error' in sim: self.altimeter_error.set(sim['altimeter_error'])
+                if 'velocity_sensor_error' in sim: self.velocity_sensor_error.set(sim['velocity_sensor_error'])
+                if 'ignition_percent_offset' in sim: self.ignition_percent_offset.set(sim['ignition_percent_offset'] * 100.0)
+                if 'ignition_hard_offset' in sim: self.ignition_hard_offset.set(sim['ignition_hard_offset'])
+                if 'show_plots' in sim: self.show_plots.set(sim['show_plots'])
+                if 'simulate_ascent' in sim: self.simulate_ascent.set(sim['simulate_ascent'])
+                
+                # Start angles
+                if sim.get('simulate_ascent'):
+                    if 'ascent_initial_pitch' in sim: self.start_pitch.set(sim['ascent_initial_pitch'])
+                    if 'ascent_initial_yaw' in sim: self.start_yaw.set(sim['ascent_initial_yaw'])
+                    if 'ascent_initial_roll' in sim: self.start_roll.set(sim['ascent_initial_roll'])
+                else:
+                    if 'descent_initial_pitch' in sim: self.start_pitch.set(sim['descent_initial_pitch'])
+                    if 'descent_initial_yaw' in sim: self.start_yaw.set(sim['descent_initial_yaw'])
+                    if 'descent_initial_roll' in sim: self.start_roll.set(sim['descent_initial_roll'])
+                
+                self.update_orientation_labels()
+                messagebox.showinfo("Success", f"Configuration loaded from {filename}")
+                self.log(f"Loaded config: {filename}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to load config: {e}")
 
 
 def main():

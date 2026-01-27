@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Example</title>
+    <link rel="stylesheet" href="../../framework.css">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <style>
+        /* Custom styles for dashboard */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .card {
+            background-color: var(--surface);
+            padding: 1.5rem;
+            border-radius: var(--border-radius);
+            box-shadow: 0 2px 4px var(--shadow);
+            transition: transform var(--animation-duration), box-shadow var(--animation-duration);
+        }
+
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px var(--shadow);
+        }
+
+        .card-title {
+            font-size: 0.9rem;
+            color: var(--on-surface);
+            opacity: 0.7;
+            margin-bottom: 0.5rem;
+        }
+
+        .card-value {
+            font-size: 2rem;
+            font-weight: bold;
+            margin-bottom: 0.5rem;
+        }
+
+        .card-icon {
+            font-size: 3rem;
+            opacity: 0.3;
+            float: right;
+        }
+
+        .chart-placeholder {
+            background-color: var(--surface);
+            padding: 2rem;
+            border-radius: var(--border-radius);
+            text-align: center;
+            margin-bottom: 1rem;
+            min-height: 200px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 2px dashed var(--shadow);
+        }
+
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            background-color: var(--surface);
+            border-radius: var(--border-radius);
+            overflow: hidden;
+        }
+
+        .data-table th,
+        .data-table td {
+            padding: 1rem;
+            text-align: left;
+            border-bottom: 1px solid var(--shadow);
+        }
+
+        .data-table th {
+            background-color: var(--primary);
+            color: var(--on-primary);
+            font-weight: 600;
+        }
+
+        .data-table tr:hover {
+            background-color: var(--background);
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+
+        .status-badge.success {
+            background-color: var(--success);
+            color: white;
+        }
+
+        .status-badge.warning {
+            background-color: var(--warning);
+            color: white;
+        }
+
+        .status-badge.error {
+            background-color: var(--error);
+            color: white;
+        }
+
+        .notification-list {
+            background-color: var(--surface);
+            border-radius: var(--border-radius);
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .notification-item {
+            padding: 1rem;
+            border-bottom: 1px solid var(--shadow);
+            display: flex;
+            gap: 1rem;
+            align-items: flex-start;
+        }
+
+        .notification-item:last-child {
+            border-bottom: none;
+        }
+
+        .notification-icon {
+            color: var(--primary);
+        }
+
+        .notification-content {
+            flex: 1;
+        }
+
+        .notification-time {
+            font-size: 0.8rem;
+            opacity: 0.6;
+        }
+
+        .action-buttons {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            margin-bottom: 1rem;
+        }
+    </style>
+</head>
+<body class="liquid-glass" data-theme="light">
+    <!-- Header -->
+    <div class="header">
+        <div class="title">Dashboard</div>
+        <div class="controls">
+            <button id="settingsBtn">⚙️ Settings</button>
+        </div>
+    </div>
+
+    <!-- Tab Navigation -->
+    <div class="tabs">
+        <button class="tab-link active" onclick="openTab(event, 'overview')">
+            <i class="material-icons">dashboard</i> Overview
+        </button>
+        <button class="tab-link" onclick="openTab(event, 'analytics')">
+            <i class="material-icons">analytics</i> Analytics
+        </button>
+        <button class="tab-link" onclick="openTab(event, 'data')">
+            <i class="material-icons">table_chart</i> Data
+        </button>
+        <button class="tab-link" onclick="openTab(event, 'notifications')">
+            <i class="material-icons">notifications</i> Notifications
+        </button>
+    </div>
+
+    <!-- Overview Tab -->
+    <div id="overview" class="tab-content" style="display: block;">
+        <h2>Dashboard Overview</h2>
+        
+        <div class="dashboard-grid">
+            <div class="card">
+                <i class="material-icons card-icon">group</i>
+                <div class="card-title">Total Users</div>
+                <div class="card-value" id="totalUsers">1,234</div>
+                <small>+12% from last month</small>
+            </div>
+
+            <div class="card">
+                <i class="material-icons card-icon">trending_up</i>
+                <div class="card-title">Revenue</div>
+                <div class="card-value" id="revenue">$45,678</div>
+                <small>+8% from last month</small>
+            </div>
+
+            <div class="card">
+                <i class="material-icons card-icon">shopping_cart</i>
+                <div class="card-title">Orders</div>
+                <div class="card-value" id="orders">567</div>
+                <small>+15% from last month</small>
+            </div>
+
+            <div class="card">
+                <i class="material-icons card-icon">star</i>
+                <div class="card-title">Avg Rating</div>
+                <div class="card-value" id="rating">4.8</div>
+                <small>Based on 890 reviews</small>
+            </div>
+        </div>
+
+        <h3>Quick Actions</h3>
+        <div class="action-buttons">
+            <button onclick="showAlert('Action 1 triggered')">
+                <i class="material-icons">add</i> Add New Item
+            </button>
+            <button onclick="showAlert('Generating report...')">
+                <i class="material-icons">assessment</i> Generate Report
+            </button>
+            <button onclick="showAlert('Exporting data...')">
+                <i class="material-icons">file_download</i> Export Data
+            </button>
+            <button onclick="refreshDashboard()">
+                <i class="material-icons">refresh</i> Refresh
+            </button>
+        </div>
+    </div>
+
+    <!-- Analytics Tab -->
+    <div id="analytics" class="tab-content">
+        <h2>Analytics</h2>
+        
+        <h3>Performance Chart</h3>
+        <div class="chart-placeholder">
+            <div>
+                <i class="material-icons" style="font-size: 4rem; opacity: 0.3;">bar_chart</i>
+                <p>Chart visualization would go here</p>
+                <small>Integrate with Chart.js, D3.js, or any charting library</small>
+            </div>
+        </div>
+
+        <h3>Growth Metrics</h3>
+        <div class="chart-placeholder">
+            <div>
+                <i class="material-icons" style="font-size: 4rem; opacity: 0.3;">show_chart</i>
+                <p>Line chart would go here</p>
+                <small>Display trends over time</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Data Tab -->
+    <div id="data" class="tab-content">
+        <h2>Data Table</h2>
+        
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Name</th>
+                    <th>Status</th>
+                    <th>Date</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="dataTableBody">
+                <tr>
+                    <td>#001</td>
+                    <td>Sample Item 1</td>
+                    <td><span class="status-badge success">Active</span></td>
+                    <td>2024-01-15</td>
+                    <td>
+                        <button onclick="editItem(1)">Edit</button>
+                    </td>
+                </tr>
+                <tr>
+                    <td>#002</td>
+                    <td>Sample Item 2</td>
+                    <td><span class="status-badge warning">Pending</span></td>
+                    <td>2024-01-14</td>
+                    <td>
+                        <button onclick="editItem(2)">Edit</button>
+                    </td>
+                </tr>
+                <tr>
+                    <td>#003</td>
+                    <td>Sample Item 3</td>
+                    <td><span class="status-badge success">Active</span></td>
+                    <td>2024-01-13</td>
+                    <td>
+                        <button onclick="editItem(3)">Edit</button>
+                    </td>
+                </tr>
+                <tr>
+                    <td>#004</td>
+                    <td>Sample Item 4</td>
+                    <td><span class="status-badge error">Inactive</span></td>
+                    <td>2024-01-12</td>
+                    <td>
+                        <button onclick="editItem(4)">Edit</button>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Notifications Tab -->
+    <div id="notifications" class="tab-content">
+        <h2>Notifications</h2>
+        
+        <div class="notification-list" id="notificationList">
+            <div class="notification-item">
+                <i class="material-icons notification-icon">info</i>
+                <div class="notification-content">
+                    <strong>System Update</strong>
+                    <p>A new version is available. Please update your application.</p>
+                    <div class="notification-time">2 hours ago</div>
+                </div>
+            </div>
+            <div class="notification-item">
+                <i class="material-icons notification-icon">warning</i>
+                <div class="notification-content">
+                    <strong>Important Notice</strong>
+                    <p>Scheduled maintenance on January 20th from 2-4 AM.</p>
+                    <div class="notification-time">1 day ago</div>
+                </div>
+            </div>
+            <div class="notification-item">
+                <i class="material-icons notification-icon">check_circle</i>
+                <div class="notification-content">
+                    <strong>Task Completed</strong>
+                    <p>Your export has been completed successfully.</p>
+                    <div class="notification-time">2 days ago</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div class="modal" id="settingsModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title">Settings</div>
+                <button class="close-btn" id="closeSettings">&times;</button>
+            </div>
+
+            <div class="form-group">
+                <label for="themeSelect">Theme:</label>
+                <select id="themeSelect">
+                    <option value="light">Light</option>
+                    <option value="dark">Dark</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="styleSelect">Style:</label>
+                <select id="styleSelect">
+                    <option value="material3">Google Material 3</option>
+                    <option value="fluent">Microsoft Fluent Design</option>
+                    <option value="liquid-glass">Liquid Glass</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="accentColorInput">Accent Color:</label>
+                <input type="color" id="accentColorInput">
+            </div>
+
+            <div class="form-group">
+                <label for="fontSizeSlider">Font Size:</label>
+                <input type="range" id="fontSizeSlider" min="12" max="24" value="16">
+            </div>
+
+            <div class="form-group toggle-group">
+                <label for="highContrastToggle">High Contrast:</label>
+                <label class="switch">
+                    <input type="checkbox" id="highContrastToggle">
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <button id="saveSettings">Save Settings</button>
+        </div>
+    </div>
+
+    <!-- Framework Scripts -->
+    <script src="../../framework.js"></script>
+    <script src="../../customizer.js"></script>
+    <script>
+        // Initialize the framework
+        const app = new UIFramework({
+            appName: 'Dashboard',
+            defaultTheme: 'light',
+            defaultStyle: 'liquid-glass'
+        });
+
+        // Dashboard App Logic
+        class DashboardApp {
+            constructor() {
+                this.initializeData();
+                this.simulateDataUpdates();
+            }
+
+            initializeData() {
+                // Load initial data
+                this.updateMetrics();
+            }
+
+            updateMetrics() {
+                // Simulate live data updates
+                const totalUsers = Math.floor(1000 + Math.random() * 500);
+                const revenue = (40000 + Math.random() * 10000).toFixed(0);
+                const orders = Math.floor(500 + Math.random() * 100);
+                const rating = (4.5 + Math.random() * 0.5).toFixed(1);
+
+                document.getElementById('totalUsers').textContent = totalUsers.toLocaleString();
+                document.getElementById('revenue').textContent = '$' + parseInt(revenue).toLocaleString();
+                document.getElementById('orders').textContent = orders.toLocaleString();
+                document.getElementById('rating').textContent = rating;
+            }
+
+            simulateDataUpdates() {
+                // Update metrics every 10 seconds
+                setInterval(() => {
+                    this.updateMetrics();
+                }, 10000);
+            }
+        }
+
+        // Global functions
+        window.showAlert = function(message) {
+            alert(message);
+        };
+
+        window.editItem = function(id) {
+            alert(`Editing item #${id}`);
+        };
+
+        window.refreshDashboard = function() {
+            dashboardApp.updateMetrics();
+            alert('Dashboard refreshed!');
+        };
+
+        // Initialize dashboard app
+        const dashboardApp = new DashboardApp();
+    </script>
+</body>
+</html>
