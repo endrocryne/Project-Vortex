@@ -84,6 +84,8 @@ class SuicideBurnSimulation:
         # Ignition offsets
         self.ignition_percent_offset = simulation_config.get('ignition_percent_offset', 0.0)
         self.ignition_hard_offset = simulation_config.get('ignition_hard_offset', 0.0)
+        # Minimum time between motor burnout and ground contact (s)
+        self.ignition_burnout_buffer = simulation_config.get('ignition_burnout_buffer', 0.5)
 
         # Simulation mode and config
         self.simulate_ascent = simulation_config.get('simulate_ascent', False)
@@ -147,13 +149,30 @@ class SuicideBurnSimulation:
         self.yaw_integral_error = 0.0
         self.last_time = 0.0
 
+        # Reset PID for ascent
+        self.last_time = 0.0
+        self.pitch_integral_error = 0.0
+        self.yaw_integral_error = 0.0
+        self.last_pitch_error = 0.0
+        self.last_yaw_error = 0.0
+        
         def powered_derivative(t, state):
             # TVC Logic (Vertical hold for ascent)
-            pitch_cmd, yaw_cmd = self.tvc_controller(state, t)
-            self.motor.set_tvc_command(pitch_cmd, yaw_cmd)
-            # DO NOT call update_tvc here - it's technically incorrect inside the derivative.
-            # However, since the original code had it, we'll keep it but ensure dt matches the step.
-            # Actually, better to use the integrator's time.
+            p_cmd, y_cmd, p_int, y_int, p_err, y_err = self.tvc_controller(
+                state, t, self.last_time, 
+                self.pitch_integral_error, self.yaw_integral_error,
+                self.last_pitch_error, self.last_yaw_error
+            )
+            
+            if t > self.last_time:
+                self.motor.set_tvc_command(p_cmd, y_cmd)
+                self.pitch_integral_error = p_int
+                self.yaw_integral_error = y_int
+                self.last_pitch_error = p_err
+                self.last_yaw_error = y_err
+                self.last_time = t
+            
+            # Update mass and other physics
             return self.state_derivative(t, state)
 
         # Ignite!
@@ -385,65 +404,98 @@ class SuicideBurnSimulation:
             a_thrust_new = (self.motor.total_impulse / t_burn) / m_avg_new
             
             # Re-solve: h_ign = v_ign^2 / (2 * (a_thrust_new - g))
-            h_ign = v_ign_sq / (2 * (a_thrust_new)) # g cancels out if we consider loss during fall
-            # Actually, as derived before: h_ign = (v0^2 + 2gh0) / (2 a_thrust)
-            # but that assumed no drag. With drag, h_ign = v_ign^2 / (2*(a_thrust - g))
-            h_ign = v_ign_sq / (2 * (max(1.0, a_thrust_new - g)))
-            
+            # Avoid dividing by a very small or negative net acceleration.
+            denom = a_thrust_new - g
+            if denom <= 1e-3:
+                # Net acceleration insufficient to arrest descent; be conservative and
+                # suggest igniting as early as possible (nozzle altitude)
+                return max(0.1, min(initial_altitude_nozzle, initial_altitude_nozzle))
+            h_ign = v_ign_sq / (2 * denom)
+
+        # Ensure motor finishes burning before the rocket hits ground (with a small buffer)
+        # Conservative check using freefall time from ignition altitude (ignoring thrust)
+        buffer = getattr(self, 'ignition_burnout_buffer', 0.5)
+        max_iter = 50
+        iter_count = 0
+        while iter_count < max_iter:
+            iter_count += 1
+            h_fall_dist = max(0.1, initial_altitude_nozzle - h_ign)
+            v_ign_sq = v_term**2 * (1 - np.exp(-2 * g * h_fall_dist / v_term**2)) + initial_velocity**2
+            v_ign = np.sqrt(max(0, v_ign_sq))
+            # Time to ground if no thrust from ignition point: solve h = v*t + 0.5*g*t^2
+            discr = v_ign**2 + 2 * g * h_fall_dist
+            t_to_ground = max(0.0, (-v_ign + np.sqrt(discr)) / g)
+
+            if t_to_ground >= (t_burn + buffer):
+                break
+
+            # Increase ignition altitude slightly (be conservative). Step is min(1 m or 5% of remaining fall)
+            step = min(1.0, max(0.5, h_fall_dist * 0.05))
+            h_ign = min(initial_altitude_nozzle, h_ign + step)
+            if h_ign >= initial_altitude_nozzle:
+                # Can't get earlier than nozzle altitude
+                break
+
         return max(0.1, min(initial_altitude_nozzle, h_ign))
-    
-    def tvc_controller(self, state, time):
+
+    def tvc_controller(self, state, time, last_time, pitch_int, yaw_int, last_pitch_err, last_yaw_err):
         """
-        TVC PID controller for attitude stabilization
-        Separate gains for pitch (y-axis) and yaw (x-axis)
+        Stateless TVC PID controller.
+        Calculates commanded gimbal angles based on current orientation.
         
         Args:
             state: current state vector
             time: current time
+            last_time: time of last update
+            pitch_int, yaw_int: current integral errors
+            last_pitch_err, last_yaw_err: previous errors
             
         Returns:
-            pitch_command, yaw_command: TVC angles (radians)
+            pitch_cmd, yaw_cmd: gimbal commands
+            new_pitch_int, new_yaw_int: updated integrals
+            pitch_err, yaw_err: current errors
         """
-        # Extract state
-        qw, qx, qy, qz = state[6:10]
+        # Target: stay vertical (identity quaternion)
+        # In body frame, Z is up. 
+        # We want to minimize the x and y components of the Z-axis in the inertial frame?
+        # No, easier: get current orientation and align with [0,0,1]
+        
+        q = state[6:10]
         omega_x, omega_y, omega_z = state[10:13]
+
+        # Simple attitude control: we want to minimize qx, qy (pitch and yaw tilts)
+        # Pitch tilt is mostly related to qy (rotation about Y)
+        # Yaw tilt is mostly related to qx (rotation about X)
         
-        # Calculate time step
-        dt = time - self.last_time if self.last_time > 0 else 0.01
-        dt = max(dt, 1e-6)  # Prevent division by zero
-        self.last_time = time
+        pitch_error = 2 * q[2] # qy
+        yaw_error = 2 * q[1]  # qx
         
-        # Target: vertical orientation (pointing up)
-        # Target quaternion: [1, 0, 0, 0]
-        
-        # Error quaternion (simplified - just use rotation components)
-        # For small angles: pitch ≈ 2*qy, yaw ≈ 2*qx
-        pitch_error = 2 * qy
-        yaw_error = 2 * qx
+        dt = time - last_time if last_time >= 0 else 0.01
+        dt = max(dt, 1e-6)
         
         # Update integral terms (with anti-windup)
         max_integral = 0.5  # Limit integral term to prevent windup
-        self.pitch_integral_error += pitch_error * dt
-        self.pitch_integral_error = np.clip(self.pitch_integral_error, -max_integral, max_integral)
+        new_pitch_int = pitch_int + pitch_error * dt
+        new_pitch_int = np.clip(new_pitch_int, -max_integral, max_integral)
         
-        self.yaw_integral_error += yaw_error * dt
-        self.yaw_integral_error = np.clip(self.yaw_integral_error, -max_integral, max_integral)
+        new_yaw_int = yaw_int + yaw_error * dt
+        new_yaw_int = np.clip(new_yaw_int, -max_integral, max_integral)
         
         # PID control for pitch (y-axis motor)
         pitch_command = (
             -self.tvc_kp_pitch * pitch_error 
-            - self.tvc_ki_pitch * self.pitch_integral_error
-            - self.tvc_kd_pitch * omega_y
+            - self.tvc_ki_pitch * new_pitch_int
+            - self.tvc_kd_pitch * omega_y # D-term uses angular velocity directly
         )
         
         # PID control for yaw (x-axis motor)
         yaw_command = (
             -self.tvc_kp_yaw * yaw_error 
-            - self.tvc_ki_yaw * self.yaw_integral_error
-            - self.tvc_kd_yaw * omega_x
+            - self.tvc_ki_yaw * new_yaw_int
+            - self.tvc_kd_yaw * omega_x # D-term uses angular velocity directly
         )
         
-        return pitch_command, yaw_command
+        return pitch_command, yaw_command, new_pitch_int, new_yaw_int, pitch_error, yaw_error
     
     def state_derivative(self, t, state):
         """
@@ -639,13 +691,17 @@ class SuicideBurnSimulation:
                 return self._func(t, y)
         
         def _ignition_event_func(t, state):
-            # Only trigger if descending (vz < 0)
+            # Only trigger if descending (vz < -0.1)
+            # Using a small negative threshold to ensure we are clearly falling
             vz = state[5]
-            if vz > 0:
-                return 1.0  # Return positive value while rising to avoid crossing zero
+            if vz > -0.1:
+                return 1.0  # Return positive value while rising/peak to avoid crossing zero
             
-            altitude = state[2]
-            return altitude - ignition_altitude_sensed
+            # Compare nozzle altitude (not CG altitude) to the sensed ignition altitude
+            R_mat = self.physics.quaternion_to_rotation_matrix(state[6:10])
+            off_local = self.calculate_dynamic_cg(state[13]) - self.fuel_tank_bottom
+            pos_n = state[0:3] - R_mat @ np.array([0, 0, off_local])
+            return pos_n[2] - ignition_altitude_sensed
         
         ignition_event = Event(_ignition_event_func, terminal=True, direction=-1)
          
@@ -657,13 +713,8 @@ class SuicideBurnSimulation:
             return pos_n[2]  # Nozzle altitude
         
         ground_event = Event(_ground_event_func, terminal=True, direction=-1)
-
-        # Event: Stop motor if velocity becomes positive (meaning we stopped in air and started climbing)
-        def _stop_climb_event_func(t, state):
-            # Only trigger if we are in descent phase and going up
-            return state[5] - 0.1 # vz > 0.1
         
-        stop_climb_event = Event(_stop_climb_event_func, terminal=True, direction=1)
+        # stop_climb_event removed: avoid terminating the entire integration on small positive vz
         
         # Integrate until ignition or ground
         
@@ -690,20 +741,41 @@ class SuicideBurnSimulation:
             
             # Ignite motor and reset PID integral terms
             self.motor.ignite(ignition_time)
+            
+            # We use a stateful wrapper that only updates state if time progresses.
+            # This is a compromise given the 14-element state vector constraint.
+            self.last_time = ignition_time
             self.pitch_integral_error = 0.0
             self.yaw_integral_error = 0.0
-            self.last_time = ignition_time
+            self.last_pitch_error = 0.0
+            self.last_yaw_error = 0.0
             
-            # Continue simulation with motor burning
             def burning_state_derivative(t, state):
-                # Update TVC controller
-                pitch_cmd, yaw_cmd = self.tvc_controller(state, t)
-                self.motor.set_tvc_command(pitch_cmd, yaw_cmd)
-                
-                # Update TVC actuator
-                if t > ignition_time:
-                    dt = 0.01
+                # Update TVC controller if moving forward
+                # Note: solve_ivp may query t slightly behind last_time due to RK stages
+                # We only update the "real" internal state of the PID if it's a new time step.
+                if t > self.last_time:
+                    p_cmd, y_cmd, p_int, y_int, p_err, y_err = self.tvc_controller(
+                        state, t, self.last_time, 
+                        self.pitch_integral_error, self.yaw_integral_error,
+                        self.last_pitch_error, self.last_yaw_error
+                    )
+                    # For the derivative calculation, we use these updated values
+                    self.motor.set_tvc_command(p_cmd, y_cmd)
+                    
+                    # Store for next step
+                    self.pitch_integral_error = p_int
+                    self.yaw_integral_error = y_int
+                    self.last_pitch_error = p_err
+                    self.last_yaw_error = y_err
+                    
+                    # Update TVC actuator
+                    dt = t - self.last_time
                     self.motor.update_tvc(dt)
+                    self.last_time = t
+                else:
+                    # Keep same command for intermediate/backward steps
+                    pass
                 
                 return self.state_derivative(t, state)
             
@@ -711,7 +783,7 @@ class SuicideBurnSimulation:
                 burning_state_derivative,
                 [ignition_time, current_time_offset + max_time],
                 state_at_ignition,
-                events=[ground_event, stop_climb_event],
+                events=[ground_event],
                 method='RK45',
                 rtol=1e-6,
                 atol=1e-9,
@@ -721,11 +793,55 @@ class SuicideBurnSimulation:
             # Combine descent solutions
             t_descent = np.concatenate([sol_freefall.t, sol_powered.t])
             y_descent = np.concatenate([sol_freefall.y, sol_powered.y], axis=1)
-            
+
+            # If the powered phase ended because it hit the configured time limit (no ground_event),
+            # try extending the integration until ground is reached.
+            try:
+                ground_triggered = len(sol_powered.t_events[0]) > 0
+            except Exception:
+                ground_triggered = False
+
+            t_end_expected = current_time_offset + max_time
+            if not ground_triggered and sol_powered.t[-1] >= (t_end_expected - 1e-6):
+                extend_sol = solve_ivp(
+                    self.state_derivative,
+                    [sol_powered.t[-1], sol_powered.t[-1] + max_time],
+                    sol_powered.y[:, -1],
+                    events=[ground_event],
+                    method='RK45',
+                    rtol=1e-6,
+                    atol=1e-9,
+                    max_step=0.01
+                )
+                if extend_sol is not None and extend_sol.t.size > 1:
+                    t_descent = np.concatenate([t_descent, extend_sol.t[1:]])
+                    y_descent = np.concatenate([y_descent, extend_sol.y[:, 1:]], axis=1)
         else:
             # No ignition (hit ground before ignition altitude)
             t_descent = sol_freefall.t
             y_descent = sol_freefall.y
+
+            # If freefall ended due to time limit without reaching ground, extend to try to reach ground
+            try:
+                ground_triggered_free = len(sol_freefall.t_events[1]) > 0
+            except Exception:
+                ground_triggered_free = False
+
+            t_end_expected_free = current_time_offset + max_time
+            if not ground_triggered_free and sol_freefall.t[-1] >= (t_end_expected_free - 1e-6):
+                extend_sol = solve_ivp(
+                    self.state_derivative,
+                    [sol_freefall.t[-1], sol_freefall.t[-1] + max_time],
+                    sol_freefall.y[:, -1],
+                    events=[ground_event],
+                    method='RK45',
+                    rtol=1e-6,
+                    atol=1e-9,
+                    max_step=0.01
+                )
+                if extend_sol is not None and extend_sol.t.size > 1:
+                    t_descent = np.concatenate([t_descent, extend_sol.t[1:]])
+                    y_descent = np.concatenate([y_descent, extend_sol.y[:, 1:]], axis=1)
         
         # STITCH ASCENT AND DESCENT HISTORY
         if len(t_ascent) > 0:

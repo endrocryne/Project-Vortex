@@ -15,14 +15,14 @@ from simulation import SuicideBurnSimulation
 
 def print_banner():
     banner = r"""
-  _______ ________   _______  _  _______  _        _______ _________ _________ _______ 
- (  ____ \\__   __/  (  ____ \| |/ /_   _|( (    /|(  ____ \\__   __/ \__   __/(  ____ \
- | (    \/   ) (     | (    \/| ' /  | |  |  \  ( || (    \/   ) (       ) (   | (    \/
- | (__       | |     | (__    |  <   | |  |   \ | || (__       | |       | |   | |      
- |  __)      | |     |  __)   |  \ \ | |  | (\ \) ||  __)      | |       | |   | |      
- | (         | |     | (      | . \ \| |  | | \   || (         | |       | |   | |      
- | (____/\   | |     | (____/\| |\  \_| |_| |  \  || (____/\   | |    ___) (___| (____/\
- (_______/   \_/     (_______/|_| \_/\___/|_|   )_)(_______/   \_/    \_______/(_______/
+ _____ _______   _______ _   _______ _   _  _____ _____ _____ _____ 
+|_   _|  ___\ \ / /_   _| | / /_   _| \ | ||  ___|_   _|_   _/  __ \
+  | | | |__  \ V /  | | | |/ /  | | |  \| || |__   | |   | | | /  \/
+  | | |  __| /   \  | | |    \  | | | . ` ||  __|  | |   | | | |    
+  | | | |___/ /^\ \ | | | |\  \_| |_| |\  || |___  | |  _| |_| \__/\
+  \_/ \____/\/   \/ \_/ \_| \_/\___/\_| \_/\____/  \_/  \___/ \____/
+                                                                    
+                                                           
                                                                                         
          !
          !
@@ -38,7 +38,10 @@ def print_banner():
       |  K  |
       |  I  |
       |  N  |
-      |     |
+      |  E  |
+      |  T  |
+      |  I  |
+      |  C  |
       |_____|
      /|##!##|\
     / |##!##| \
@@ -476,6 +479,178 @@ def run_optimization(config_file=None, sim_overrides=None):
     print("=" * 60)
 
 
+def ensure_configs_dir():
+    from pathlib import Path
+    Path('configs').mkdir(exist_ok=True)
+
+
+def _input(prompt_text, default=None):
+    try:
+        if default is not None:
+            val = input(f"{prompt_text} [{default}]: ")
+            return val if val != "" else default
+        return input(f"{prompt_text}: ")
+    except EOFError:
+        return default
+
+
+def _parse_value(input_str, current_value):
+    if input_str is None:
+        return current_value
+    # Keep type of current value when possible
+    try:
+        if isinstance(current_value, bool):
+            lowered = str(input_str).strip().lower()
+            return lowered in ('1', 'true', 'y', 'yes')
+        if isinstance(current_value, int):
+            return int(input_str)
+        if isinstance(current_value, float):
+            return float(input_str)
+        if isinstance(current_value, (list, dict)):
+            import json
+            return json.loads(input_str)
+    except Exception:
+        pass
+    return input_str
+
+
+def load_config_file(path):
+    import json
+    if not path:
+        return None
+    if not os.path.exists(path):
+        print(f"Config file not found: {path}")
+        return None
+    with open(path, 'r') as f:
+        data = json.load(f)
+    return data
+
+
+def save_config_file(path, config):
+    import json
+    with open(path, 'w') as f:
+        json.dump(config, f, indent=2)
+    print(f"Saved config to: {path}")
+
+
+def show_config_summary(config):
+    print("\nCurrent Configuration:\n")
+    for section in ('rocket', 'environment', 'simulation'):
+        print(f"[{section}]")
+        for k, v in sorted(config.get(section, {}).items()):
+            print(f"  {k}: {v}")
+        print("")
+
+
+def edit_section_interactive(config, section_name):
+    section = config.setdefault(section_name, {})
+    keys = sorted(section.keys())
+    while True:
+        print(f"\nEditing section: {section_name}")
+        for i, k in enumerate(keys, 1):
+            print(f"{i}) {k} = {section[k]}")
+        print("a) Add new key")
+        print("b) Back")
+        choice = _input("Choose an entry to edit", "b")
+        if choice == 'b':
+            break
+        if choice == 'a':
+            new_key = _input("Enter new key name")
+            if not new_key:
+                continue
+            new_val = _input("Enter value (as JSON for lists/dicts) or raw string")
+            section[new_key] = _parse_value(new_val, new_val)
+            keys = sorted(section.keys())
+            continue
+        try:
+            idx = int(choice) - 1
+            key = keys[idx]
+        except Exception:
+            print("Invalid choice")
+            continue
+        cur = section[key]
+        new_val = _input(f"New value for {key}", str(cur))
+        section[key] = _parse_value(new_val, cur)
+
+
+def interactive_menu(initial_config=None, initial_overrides=None):
+    ensure_configs_dir()
+    config = initial_config or {
+        'rocket': {},
+        'environment': {},
+        'simulation': {}
+    }
+    overrides = initial_overrides or {}
+
+    while True:
+        print('\n' + '=' * 60)
+        print('VORTEX CLI - Interactive Mode')
+        print('1) Show current configuration')
+        print('2) Edit rocket parameters')
+        print('3) Edit environment parameters')
+        print('4) Edit simulation parameters')
+        print('5) Load config from file')
+        print('6) Save config to file')
+        print('7) Run single simulation')
+        print('8) Run optimization')
+        print('9) Set overrides (ascent/initial attitude / MC params)')
+        print('0) Exit')
+        choice = _input('Select an option', '0')
+
+        if choice == '1':
+            show_config_summary(config)
+        elif choice == '2':
+            edit_section_interactive(config, 'rocket')
+        elif choice == '3':
+            edit_section_interactive(config, 'environment')
+        elif choice == '4':
+            edit_section_interactive(config, 'simulation')
+        elif choice == '5':
+            path = _input('Config file path', '')
+            data = load_config_file(path)
+            if data:
+                config.setdefault('rocket', {}).update(data.get('rocket', {}))
+                config.setdefault('environment', {}).update(data.get('environment', {}))
+                config.setdefault('simulation', {}).update(data.get('simulation', {}))
+                print('Loaded config and merged into current configuration')
+        elif choice == '6':
+            name = _input('Filename to save (will be placed in configs/)', 'my_config.json')
+            path = os.path.join('configs', name)
+            save_config_file(path, config)
+        elif choice == '7':
+            # write temp config and run single
+            import tempfile, json
+            tmp_path = os.path.join('configs', f'temp_run_single_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json')
+            save_config_file(tmp_path, config)
+            print('\nStarting single simulation... (use Ctrl+C to cancel)')
+            try:
+                run_single_simulation(tmp_path, overrides)
+            except KeyboardInterrupt:
+                print('\nSimulation interrupted by user')
+        elif choice == '8':
+            tmp_path = os.path.join('configs', f'temp_run_opt_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json')
+            save_config_file(tmp_path, config)
+            print('\nStarting optimization... (this may take a while; use Ctrl+C to cancel)')
+            try:
+                run_optimization(tmp_path, overrides)
+            except KeyboardInterrupt:
+                print('\nOptimization interrupted by user')
+        elif choice == '9':
+            print('\nCurrent overrides:')
+            for k, v in overrides.items():
+                print(f"  {k}: {v}")
+            k = _input('Override key to set (e.g. num_monte_carlo, altitude_search_range) or blank to go back', '')
+            if k:
+                v = _input('Value')
+                overrides[k] = _parse_value(v, overrides.get(k))
+                print('Override set')
+        elif choice == '0':
+            print('Exiting interactive CLI')
+            break
+        else:
+            print('Invalid selection')
+
+
 def main():
     print_banner()
     parser = argparse.ArgumentParser(description='Suicide Burn Flight Dynamics Simulation')
@@ -485,17 +660,18 @@ def main():
     parser.add_argument('--mc-runs', type=int, help='Monte Carlo runs per altitude (default: 100)')
     parser.add_argument('--search-range', type=float, help='Altitude search range in meters (default: 10.0)')
     parser.add_argument('--altitude-step', type=float, help='Altitude step size in meters (default: 0.1)')
-    
+    parser.add_argument('--auto', action='store_true', help='Run immediately without interactive menu (backwards compatible)')
+
     # New arguments
     parser.add_argument('--ascent', action='store_true', help='Simulate full ascent phase')
     parser.add_argument('--pitch', type=float, default=0.0, help='Initial Pitch (deg). If ascent, applies to launch. If descent only, applies to start.')
     parser.add_argument('--yaw', type=float, default=0.0, help='Initial Yaw (deg)')
     parser.add_argument('--roll', type=float, default=0.0, help='Initial Roll (deg)')
-    parser.add_argument('--ignition-percent-offset', type=float, default=0.0, help='Ignition altitude percent offset (%)')
+    parser.add_argument('--ignition-percent-offset', type=float, default=0.0, help='Ignition altitude percent offset (percent)')
     parser.add_argument('--ignition-hard-offset', type=float, default=0.0, help='Ignition altitude hard offset (m)')
-    
+
     args = parser.parse_args()
-    
+
     # Prepare config overrides
     sim_overrides = {}
     if args.mc_runs is not None:
@@ -504,10 +680,10 @@ def main():
         sim_overrides['altitude_search_range'] = args.search_range
     if args.altitude_step is not None:
         sim_overrides['altitude_step'] = args.altitude_step
-    
+
     sim_overrides['ignition_percent_offset'] = args.ignition_percent_offset / 100.0
     sim_overrides['ignition_hard_offset'] = args.ignition_hard_offset
-        
+
     # Handle Ascent/Orientation Logic
     if args.ascent:
         sim_overrides['simulate_ascent'] = True
@@ -521,11 +697,19 @@ def main():
         sim_overrides['descent_initial_yaw'] = args.yaw
         sim_overrides['descent_initial_roll'] = args.roll
 
-    
-    if args.mode == 'single':
-        run_single_simulation(args.config, sim_overrides)
-    elif args.mode == 'optimize':
-        run_optimization(args.config, sim_overrides)
+    # If --auto is provided, preserve previous behavior and run immediately
+    if args.auto:
+        if args.mode == 'single':
+            run_single_simulation(args.config, sim_overrides)
+        elif args.mode == 'optimize':
+            run_optimization(args.config, sim_overrides)
+        return
+
+    # Otherwise launch interactive CLI
+    initial_config = None
+    if args.config:
+        initial_config = load_config_file(args.config)
+    interactive_menu(initial_config or {}, sim_overrides)
 
 
 if __name__ == '__main__':
