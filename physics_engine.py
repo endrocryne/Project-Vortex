@@ -153,3 +153,33 @@ class PhysicsEngine:
         z = cr * cp * sy - sr * sp * cy
 
         return self.normalize_quaternion(np.array([w, x, y, z]))
+    
+    def quaternion_to_euler(self, q):
+        """
+        Convert quaternion to Euler angles (roll, pitch, yaw) in radians
+        
+        Args:
+            q: quaternion [w, x, y, z]
+            
+        Returns:
+            np.array([roll, pitch, yaw]) in radians
+        """
+        w, x, y, z = q
+        
+        # Roll (x-axis rotation)
+        sinr_cosp = 2 * (w * x + y * z)
+        cosr_cosp = 1 - 2 * (x**2 + y**2)
+        roll = np.arctan2(sinr_cosp, cosr_cosp)
+        
+        # Pitch (y-axis rotation)
+        sinp = 2 * (w * y - z * x)
+        # Clamp to avoid numerical issues with arcsin
+        sinp = np.clip(sinp, -1.0, 1.0)
+        pitch = np.arcsin(sinp)
+        
+        # Yaw (z-axis rotation)
+        siny_cosp = 2 * (w * z + x * y)
+        cosy_cosp = 1 - 2 * (y**2 + z**2)
+        yaw = np.arctan2(siny_cosp, cosy_cosp)
+        
+        return np.array([roll, pitch, yaw])

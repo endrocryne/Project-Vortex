@@ -17,7 +17,7 @@ APPS = [
         "id": "gui_sim",
         "name": "HexaKinetic",
         "desc": "State of the art 6DOF rocket simulation and config interface.",
-        "version": "0.4.7",
+        "version": "0.5.0",
         "exec": [sys.executable, "gui.py"],
         "icon": "hexakinetic_icon.png"
     },
@@ -25,7 +25,7 @@ APPS = [
         "id": "cli_sim",
         "name": "TextKinetic",
         "desc": "Lightweight, terminal-based simulation interface based on HexaKinetic.",
-        "version": "0.4.5",
+        "version": "0.4.6",
         "exec": ["powershell", "-NoExit", "-Command", f"& '{sys.executable}' cli.py"],
         "icon": "textkinetic_icon.png"
     },
@@ -41,7 +41,7 @@ APPS = [
         "id": "control",
         "name": "Vortex Mission Control",
         "desc": "Direct hardware link and mission management.",
-        "version": "0.18.2",
+        "version": "0.19.0",
         "exec": [sys.executable, "vortex-control.py"],
         "icon": "missioncontrol_icon.png"
     }
@@ -207,8 +207,6 @@ class VortexLauncher(QMainWindow):
         icon_path = os.path.join('assets', 'vortex_icon.png')
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
-            myappid = 'vortex.desktop.launcher.v1'
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
 
         # Central Widget
         central = QWidget()
@@ -266,10 +264,6 @@ class VortexLauncher(QMainWindow):
             self.save_state()
 
 if __name__ == '__main__':
-    # Fix Taskbar Icon on Windows
-    launcher_id = 'co.mishra.rockets.vortex.launcher' 
-    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(launcher_id)
-
     app = QApplication(sys.argv)
     app.setWindowIcon(QIcon('assets/vortex_icon.png'))
     # Professional dark style

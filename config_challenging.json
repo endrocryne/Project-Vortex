@@ -33,5 +33,15 @@
   "simulation": {
     "altimeter_error": 0.02,
     "velocity_sensor_error": 0.02
+  },
+  "faults": {
+    "enabled": false,
+    "fault_groups": []
+  },
+  "ml_flight_computer": {
+    "enabled": false,
+    "model_path": null,
+    "scaler_path": null,
+    "update_interval": 0.5
   }
 }

@@ -40,7 +40,12 @@ class SolidMotor:
         self.total_impulse = config.get('total_impulse', trapezoid(thrusts, times))
         
         # Calculate mass flow rate (assume constant for simplicity)
-        self.mass_flow_rate = self.propellant_mass / self.burn_time
+        # Safety check to prevent division by zero
+        if self.burn_time > 0:
+            self.mass_flow_rate = self.propellant_mass / self.burn_time
+        else:
+            # Instantaneous burn (unrealistic but safe fallback)
+            self.mass_flow_rate = 0.0
         
         # TVC parameters
         self.tvc_max_angle = np.radians(config.get('tvc_max_angle', 5.0))

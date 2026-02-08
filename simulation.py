@@ -72,6 +72,10 @@ class SuicideBurnSimulation:
         self.tvc_ki_yaw = rocket_config.get('tvc_ki_yaw', 0.05)
         self.tvc_kd_yaw = rocket_config.get('tvc_kd_yaw', 0.1)
         
+        # New TVC Mode and Drift Correction Gain
+        self.tvc_mode = rocket_config.get('tvc_mode', simulation_config.get('tvc_mode', 'orientation'))
+        self.tvc_drift_gain = rocket_config.get('tvc_drift_gain', simulation_config.get('tvc_drift_gain', 0.1))
+        
         # Integral error accumulators
         self.pitch_integral_error = 0.0
         self.yaw_integral_error = 0.0
@@ -412,29 +416,10 @@ class SuicideBurnSimulation:
                 return max(0.1, min(initial_altitude_nozzle, initial_altitude_nozzle))
             h_ign = v_ign_sq / (2 * denom)
 
-        # Ensure motor finishes burning before the rocket hits ground (with a small buffer)
-        # Conservative check using freefall time from ignition altitude (ignoring thrust)
-        buffer = getattr(self, 'ignition_burnout_buffer', 0.5)
-        max_iter = 50
-        iter_count = 0
-        while iter_count < max_iter:
-            iter_count += 1
-            h_fall_dist = max(0.1, initial_altitude_nozzle - h_ign)
-            v_ign_sq = v_term**2 * (1 - np.exp(-2 * g * h_fall_dist / v_term**2)) + initial_velocity**2
-            v_ign = np.sqrt(max(0, v_ign_sq))
-            # Time to ground if no thrust from ignition point: solve h = v*t + 0.5*g*t^2
-            discr = v_ign**2 + 2 * g * h_fall_dist
-            t_to_ground = max(0.0, (-v_ign + np.sqrt(discr)) / g)
-
-            if t_to_ground >= (t_burn + buffer):
-                break
-
-            # Increase ignition altitude slightly (be conservative). Step is min(1 m or 5% of remaining fall)
-            step = min(1.0, max(0.5, h_fall_dist * 0.05))
-            h_ign = min(initial_altitude_nozzle, h_ign + step)
-            if h_ign >= initial_altitude_nozzle:
-                # Can't get earlier than nozzle altitude
-                break
+        # The previous conservative check (ensuring freefall time > burn time) was incorrect for suicide burns.
+        # It caused the estimated ignition altitude to be much higher than necessary because it didn't account
+        # for the fact that the motor slows the rocket down, extending the flight time for a given distance.
+        # We rely on the iterative energy/kinematics calculation above.
 
         return max(0.1, min(initial_altitude_nozzle, h_ign))
 
@@ -461,14 +446,32 @@ class SuicideBurnSimulation:
         # No, easier: get current orientation and align with [0,0,1]
         
         q = state[6:10]
+        vx, vy = state[3], state[4]
         omega_x, omega_y, omega_z = state[10:13]
 
-        # Simple attitude control: we want to minimize qx, qy (pitch and yaw tilts)
-        # Pitch tilt is mostly related to qy (rotation about Y)
-        # Yaw tilt is mostly related to qx (rotation about X)
+        # Target setpoints
+        target_pitch = 0.0
+        target_yaw = 0.0
         
-        pitch_error = 2 * q[2] # qy
-        yaw_error = 2 * q[1]  # qx
+        if self.tvc_mode == 'velocity':
+            # Velocity Hold (Drift Correction):
+            # Tilt INTO the wind/velocity to generate a counter-acting thrust component.
+            # VX+ (East) needs TargetPitch < 0 to get -X thrust component.
+            # VY+ (North) needs TargetYaw > 0 to get -Y thrust component.
+            target_pitch = -vx * self.tvc_drift_gain
+            target_yaw = vy * self.tvc_drift_gain
+            
+            # Limit target tilt to 15 degrees to prevent loss of control
+            max_tilt = np.radians(15.0)
+            target_pitch = np.clip(target_pitch, -max_tilt, max_tilt)
+            target_yaw = np.clip(target_yaw, -max_tilt, max_tilt)
+
+        # Simple attitude control: we want to minimize error relative to targets
+        # Pitch tilt is related to qy (2*qy approx pitch in rad)
+        # Yaw tilt is related to qx (2*qx approx yaw in rad)
+        
+        pitch_error = (2 * q[2]) - target_pitch
+        yaw_error = (2 * q[1]) - target_yaw
         
         dt = time - last_time if last_time >= 0 else 0.01
         dt = max(dt, 1e-6)
@@ -485,14 +488,14 @@ class SuicideBurnSimulation:
         pitch_command = (
             -self.tvc_kp_pitch * pitch_error 
             - self.tvc_ki_pitch * new_pitch_int
-            - self.tvc_kd_pitch * omega_y # D-term uses angular velocity directly
+            - self.tvc_kd_pitch * omega_y 
         )
         
         # PID control for yaw (x-axis motor)
         yaw_command = (
             -self.tvc_kp_yaw * yaw_error 
             - self.tvc_ki_yaw * new_yaw_int
-            - self.tvc_kd_yaw * omega_x # D-term uses angular velocity directly
+            - self.tvc_kd_yaw * omega_x 
         )
         
         return pitch_command, yaw_command, new_pitch_int, new_yaw_int, pitch_error, yaw_error
@@ -587,17 +590,10 @@ class SuicideBurnSimulation:
     def run_simulation(self, initial_state, ignition_altitude=None, max_time=60.0):
         """
         Run a single simulation
-        
-        Args:
-            initial_state: initial state vector
-            ignition_altitude: altitude at which to ignite motor (m). If None, calculated analytically.
-            max_time: maximum simulation time (s)
-            
-        Returns:
-            success: True if landing was successful
-            final_state: final state at touchdown or timeout
-            history: dict with time history of all variables
         """
+        # Ensure fresh motor for every run
+        from solid_motor import SolidMotor
+        self.motor = SolidMotor(self.rocket_config)
         
         # Results containers
         t_ascent = np.array([])
@@ -802,7 +798,11 @@ class SuicideBurnSimulation:
                 ground_triggered = False
 
             t_end_expected = current_time_offset + max_time
-            if not ground_triggered and sol_powered.t[-1] >= (t_end_expected - 1e-6):
+            # If the powered phase completed without hitting the ground, always attempt
+            # to continue integrating until `ground_event` is triggered. Previously this
+            # only happened when the powered phase hit the overall time limit which
+            # could leave the simulation terminating in mid-air after a burnout.
+            if not ground_triggered:
                 extend_sol = solve_ivp(
                     self.state_derivative,
                     [sol_powered.t[-1], sol_powered.t[-1] + max_time],
@@ -828,7 +828,11 @@ class SuicideBurnSimulation:
                 ground_triggered_free = False
 
             t_end_expected_free = current_time_offset + max_time
-            if not ground_triggered_free and sol_freefall.t[-1] >= (t_end_expected_free - 1e-6):
+            # If freefall completed without reaching ground, always attempt to extend
+            # the integration until ground is reached rather than only when the time
+            # limit was hit. This prevents the simulation from stopping in mid-air
+            # (e.g., right after burnout).
+            if not ground_triggered_free:
                 extend_sol = solve_ivp(
                     self.state_derivative,
                     [sol_freefall.t[-1], sol_freefall.t[-1] + max_time],
@@ -977,9 +981,6 @@ class SuicideBurnSimulation:
             histories = []
             
             for i in range(int(num_monte_carlo)):
-                # Reset motor
-                self.motor = SolidMotor(self.rocket_config)
-                
                 # Run simulation
                 success, final_state, history = self.run_simulation(
                     initial_state.copy(), altitude
@@ -1064,3 +1065,154 @@ class SuicideBurnSimulation:
               f"({best_success_rate*100:.1f}% success rate)")
         
         return best_altitude, success_rates, best_history
+
+    def optimize_ignition_altitude_adaptive(self, initial_state, num_monte_carlo=10,
+                                            altitude_search_range=10.0,
+                                            max_iterations=3, samples_per_step=10,
+                                            target_step=0.01,
+                                            progress_callback=None,
+                                            save_each_trial=False, results_folder=None, 
+                                            save_plots_per_trial=False):
+        """
+        Adaptive optimization for ignition altitude.
+        Iteratively narrows the search range based on the trend of final velocity.
+        
+        Args:
+            initial_state: initial state vector
+            num_monte_carlo: runs per altitude in the final refinement stage
+            altitude_search_range: initial range to search around analytical estimate
+            max_iterations: maximum number of refinement steps
+            samples_per_step: number of altitudes to test in each zoom-in step
+            target_step: stop refining if step size is smaller than this
+            progress_callback: optional callback(completed, total)
+            save_each_trial: save CSVs for every run?
+            results_folder: folder for saving trials
+            
+        Returns:
+            optimal_altitude, convergence_history
+        """
+        # Calculate analytical estimate
+        if self.simulate_ascent:
+            q_start = self.physics.euler_to_quaternion(
+                np.radians(self.ascent_initial_roll),
+                np.radians(self.ascent_initial_pitch),
+                np.radians(self.ascent_initial_yaw)
+            )
+            temp_state = initial_state.copy()
+            temp_state[6:10] = q_start
+            apogee_state, _, _ = self.run_ascent_phase(temp_state)
+            v_for_est = apogee_state[5]
+            h_for_est = apogee_state[2]
+        else:
+            v_for_est = initial_state[5]
+            h_for_est = initial_state[2]
+        
+        center_alt = self.calculate_ignition_altitude(v_for_est, h_for_est)
+        current_range = altitude_search_range
+        
+        convergence_history = []
+        best_overall_altitude = center_alt
+        best_overall_velocity = float('inf')
+        best_overall_history = None
+        
+        # Total runs calculation: (max_iterations-1) * samples * 5 + 1 * samples * num_monte_carlo
+        total_estimated_runs = (max_iterations - 1) * samples_per_step * 5 + samples_per_step * int(num_monte_carlo)
+        runs_completed = 0
+
+        trials_dir = None
+        if save_each_trial:
+            if not results_folder:
+                raise ValueError("results_folder must be provided when save_each_trial=True")
+            trials_dir = os.path.join(results_folder, 'trials')
+            os.makedirs(trials_dir, exist_ok=True)
+
+        for iteration in range(max_iterations):
+            step_size = (current_range * 2) / (samples_per_step - 1)
+            if step_size < target_step / 2:
+                break
+                
+            alt_to_test = np.linspace(
+                max(0.1, center_alt - current_range),
+                center_alt + current_range,
+                samples_per_step
+            )
+            
+            print(f"\nAdaptive Iteration {iteration+1}/{max_iterations}: Range [{alt_to_test[0]:.2f}, {alt_to_test[-1]:.2f}], Step {step_size:.3f}")
+            
+            iteration_results = []
+            for alt in alt_to_test:
+                test_runs = 5 if iteration < max_iterations - 1 else num_monte_carlo
+                
+                final_velocities = []
+                for i in range(int(test_runs)):
+                    success, final_state, history = self.run_simulation(initial_state.copy(), alt)
+                    # Metric is final vertical velocity absolute
+                    final_velocities.append(abs(final_state[5]))
+                    
+                    # Save per-trial raw data if requested
+                    if save_each_trial and trials_dir is not None:
+                        alt_str = f"{alt:.2f}".replace('.', 'p')
+                        idx_str = f"iter{iteration+1}_{i+1:03d}"
+                        status = 'success' if success else 'fail'
+                        csv_name = os.path.join(trials_dir, f"trial_alt{alt_str}_{idx_str}_{status}.csv")
+                        try:
+                            with open(csv_name, 'w', newline='') as f:
+                                writer = csv.writer(f)
+                                writer.writerow(['Time', 'X', 'Y', 'Z', 'VX', 'VY', 'VZ', 'QW', 'QX', 'QY', 'QZ', 'Mass', 'AltitudeTest'])
+                                for k in range(len(history['t'])):
+                                    writer.writerow([
+                                        history['t'][k], history['x'][k], history['y'][k], history['z'][k],
+                                        history['vx'][k], history['vy'][k], history['vz'][k],
+                                        history['qw'][k], history['qx'][k], history['qy'][k], history['qz'][k],
+                                        history['mass'][k], alt
+                                    ])
+                        except Exception as e:
+                            print(f"Could not save adaptive trial CSV {csv_name}: {e}")
+
+                        if save_plots_per_trial:
+                            png_name = os.path.join(trials_dir, f"trial_alt{alt_str}_{idx_str}_{status}.png")
+                            try:
+                                plt.figure(figsize=(6, 3))
+                                plt.plot(history['t'], history['z'], 'b-')
+                                plt.xlabel('Time (s)')
+                                plt.ylabel('Altitude (m)')
+                                plt.title(f'Iter {iteration+1} alt {alt:.2f}')
+                                plt.grid(True)
+                                plt.tight_layout()
+                                plt.savefig(png_name, dpi=100, bbox_inches='tight')
+                                plt.close()
+                            except Exception:
+                                pass
+
+                    runs_completed += 1
+                    if progress_callback:
+                        progress_callback(runs_completed, total_estimated_runs)
+                    else:
+                        print(f"\rProgress: {runs_completed}/{total_estimated_runs} simulations", end='')
+
+                avg_vel = np.mean(final_velocities)
+                iteration_results.append((alt, avg_vel))
+                print(f"\n  Alt {alt:.2f} m -> Avg Final Velocity: {avg_vel:.2f} m/s")
+                if avg_vel < best_overall_velocity:
+                    best_overall_velocity = avg_vel
+                    best_overall_altitude = alt
+                    # We store the latest history of the best altitude as an example
+                    best_overall_history = history
+            
+            # Sort and find best in this iteration
+            iteration_results.sort(key=lambda x: x[1])
+            best_iter_alt, best_iter_vel = iteration_results[0]
+            
+            convergence_history.append({
+                'iteration': iteration,
+                'range': (alt_to_test[0], alt_to_test[-1]),
+                'best_alt': best_iter_alt,
+                'best_vel': best_iter_vel
+            })
+            
+            # Zoom in: new center is the best alt, new range is reduced
+            center_alt = best_iter_alt
+            current_range = current_range / (samples_per_step / 2.0) # Zoom factor
+            
+        print(f"\nAdaptive optimization converged to {best_overall_altitude:.3f} m")
+        return best_overall_altitude, convergence_history, best_overall_history

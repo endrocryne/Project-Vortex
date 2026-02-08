@@ -58,5 +58,15 @@
     "descent_initial_pitch": 0.0,
     "descent_initial_yaw": 0.0,
     "descent_initial_roll": 0.0
+  },
+  "faults": {
+    "enabled": false,
+    "fault_groups": []
+  },
+  "ml_flight_computer": {
+    "enabled": false,
+    "model_path": null,
+    "scaler_path": null,
+    "update_interval": 0.5
   }
 }

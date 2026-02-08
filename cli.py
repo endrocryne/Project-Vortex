@@ -114,17 +114,31 @@ def run_single_simulation(config_file=None, sim_overrides=None):
             rocket_config.update(config.get('rocket', {}))
             env_config.update(config.get('environment', {}))
             sim_config.update(config.get('simulation', {}))
+            fault_config = config.get('faults', {'enabled': False, 'fault_groups': []})
+            ml_config = config.get('ml_flight_computer', {'enabled': False})
+    else:
+        fault_config = {'enabled': False, 'fault_groups': []}
+        ml_config = {'enabled': False}
     
     print("=" * 60)
     print("SUICIDE BURN SIMULATION - SINGLE RUN")
     print("=" * 60)
     
-    # Create simulation
-    sim = SuicideBurnSimulation(rocket_config, env_config, sim_config)
+    # Create simulation (use EnhancedSimulation if faults or ML enabled)
+    from simulation_wrapper import EnhancedSimulation
+    if fault_config.get('enabled') or ml_config.get('enabled'):
+        print("\n[INFO] Using enhanced simulation with fault injection and/or ML flight computer")
+        enhanced_sim = EnhancedSimulation(rocket_config, env_config, sim_config, fault_config, ml_config)
+        sim = enhanced_sim.simulation  # For compatibility
+        use_enhanced = True
+    else:
+        sim = SuicideBurnSimulation(rocket_config, env_config, sim_config)
+        enhanced_sim = None
+        use_enhanced = False
     
     # Initial conditions
     initial_altitude = env_config.get('initial_altitude', 1000.0)
-    initial_velocity = env_config.get('initial_velocity', -50.0)
+    initial_velocity = env_config.get('initial_velocity', 0.0)
     
     initial_state = np.array([
         0, 0, initial_altitude,
@@ -156,10 +170,16 @@ def run_single_simulation(config_file=None, sim_overrides=None):
     print("\nRunning simulation...")
     # Passing ignition_altitude=None allows the simulation to calculate it 
     # dynamically based on apogee if simulate_ascent is True.
-    success, final_state, history = sim.run_simulation(initial_state, None)
+    if use_enhanced:
+        assert enhanced_sim is not None, "Enhanced simulation should be initialized"
+        history = enhanced_sim.run_simulation(initial_state, None)
+        success = history.get('success', False)
+        final_state = None  # Not needed for enhanced sim
+    else:
+        success, final_state, history = sim.run_simulation(initial_state, None)
     
     # Ignition altitude used (can be retrieved from history)
-    actual_ignition_altitude = history.get('ignition_altitude', 0.0)
+    actual_ignition_altitude = history.get('ignition_altitude', 0.0) if isinstance(history, dict) else 0.0
     print(f"Calculated ignition altitude: {actual_ignition_altitude:.2f} m")
     
     # Results
@@ -183,7 +203,9 @@ def run_single_simulation(config_file=None, sim_overrides=None):
         json.dump({
             "rocket": rocket_config,
             "environment": env_config,
-            "simulation": sim_config
+            "simulation": sim_config,
+            "faults": fault_config,
+            "ml_flight_computer": ml_config
         }, f, indent=2)
     
     # Save CSV
@@ -345,7 +367,7 @@ def run_optimization(config_file=None, sim_overrides=None):
     
     # Initial conditions
     initial_altitude = env_config.get('initial_altitude', 1000.0)
-    initial_velocity = env_config.get('initial_velocity', -50.0)
+    initial_velocity = env_config.get('initial_velocity', 0.0)
     
     initial_state = np.array([
         0, 0, initial_altitude,
@@ -358,41 +380,12 @@ def run_optimization(config_file=None, sim_overrides=None):
     print(f"\nInitial altitude: {initial_altitude:.2f} m")
     print(f"Initial velocity: {initial_velocity:.2f} m/s")
     
-    # Get parameters from config or use defaults
-    num_mc = sim_config.get('num_monte_carlo', 100)
-    search_range = sim_config.get('altitude_search_range', 10.0)
-    alt_step = sim_config.get('altitude_step', 0.1)
-    
-    # Calculate number of altitudes to check
-    num_altitudes = int(2 * search_range / alt_step) + 1
-    
-    print(f"Monte Carlo runs per altitude: {num_mc}")
-    print(f"Search range: ±{search_range} m")
-    print(f"Step size: {alt_step} m")
-    print(f"Total altitudes to check: {num_altitudes}")
-    print(f"Total simulations: {num_mc * num_altitudes}")
-    print("\nRunning optimization (this may take a few minutes)...\n")
-    
-    # Run optimization
-    optimal_altitude, success_rates, best_history = sim.optimize_ignition_altitude(
-        initial_state,
-        num_monte_carlo=num_mc,
-        altitude_search_range=search_range,
-        altitude_step=alt_step
-    )
-    
-    print("\n" + "=" * 60)
-    print("OPTIMIZATION RESULTS")
-    print("=" * 60)
-    print(f"Optimal ignition altitude: {optimal_altitude:.2f} m")
-    print(f"Success rate at optimal altitude: {success_rates[optimal_altitude]*100:.1f}%")
-    
-    # Results folder
+    # Create results folder upfront for real-time saving
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     results_dir = os.path.join('results', f'optimization_{timestamp}')
     os.makedirs(results_dir, exist_ok=True)
     
-    # Save config
+    # Save config upfront
     config_path = os.path.join(results_dir, 'config.json')
     with open(config_path, 'w') as f:
         json.dump({
@@ -400,6 +393,64 @@ def run_optimization(config_file=None, sim_overrides=None):
             "environment": env_config,
             "simulation": sim_config
         }, f, indent=2)
+
+    num_mc = sim_config.get('num_monte_carlo', 100)
+    search_range = sim_config.get('altitude_search_range', 10.0)
+    opt_mode = sim_config.get('optimization_mode', 'grid')
+    
+    if opt_mode == 'adaptive':
+        max_iters = sim_config.get('opt_max_iterations', 3)
+        samples = sim_config.get('opt_samples_per_step', 10)
+        target = sim_config.get('opt_target_step', 0.01)
+        
+        print(f"Optimization Mode: Adaptive")
+        print(f"Max Iterations: {max_iters}")
+        print(f"Samples per Step: {samples}")
+        print(f"Target Resolution: {target} m")
+        print(f"Initial Search Range: ±{search_range} m")
+        print("\nRunning adaptive optimization...\n")
+        
+        optimal_altitude, convergence_history, best_history = sim.optimize_ignition_altitude_adaptive(
+            initial_state,
+            num_monte_carlo=num_mc,
+            altitude_search_range=search_range,
+            max_iterations=max_iters,
+            samples_per_step=samples,
+            target_step=target,
+            save_each_trial=True,
+            results_folder=results_dir,
+            save_plots_per_trial=True
+        )
+        success_rates = {optimal_altitude: 1.0} # Placeholder
+    else:
+        alt_step = sim_config.get('altitude_step', 0.1)
+        # Calculate number of altitudes to check
+        num_altitudes = int(2 * search_range / alt_step) + 1
+        
+        print(f"Optimization Mode: Grid Search")
+        print(f"Monte Carlo runs per altitude: {num_mc}")
+        print(f"Search range: ±{search_range} m")
+        print(f"Step size: {alt_step} m")
+        print(f"Total altitudes to check: {num_altitudes}")
+        print(f"Total simulations: {num_mc * num_altitudes}")
+        print("\nRunning optimization (this may take a few minutes)...\n")
+        
+        # Run optimization
+        optimal_altitude, success_rates, best_history = sim.optimize_ignition_altitude(
+            initial_state,
+            num_monte_carlo=num_mc,
+            altitude_search_range=search_range,
+            altitude_step=alt_step,
+            save_each_trial=True,
+            results_folder=results_dir,
+            save_plots_per_trial=True
+        )
+    
+    print("\n" + "=" * 60)
+    print("OPTIMIZATION RESULTS")
+    print("=" * 60)
+    print(f"Optimal ignition altitude: {optimal_altitude:.2f} m")
+    print(f"Success rate at optimal altitude: {success_rates[optimal_altitude]*100:.1f}%")
 
     # Save results CSV
     import csv
@@ -604,7 +655,38 @@ def interactive_menu(initial_config=None, initial_overrides=None):
         elif choice == '3':
             edit_section_interactive(config, 'environment')
         elif choice == '4':
-            edit_section_interactive(config, 'simulation')
+            while True:
+                sim = config.get('simulation', {})
+                print(f"\nEditing Simulation Parameters:")
+                print(f"1.  Monte Carlo Runs: {sim.get('num_monte_carlo', 100)}")
+                print(f"2.  Altitude Search Range: {sim.get('altitude_search_range', 10.0)} m")
+                print(f"3.  Altitude Step (Grid): {sim.get('altitude_step', 0.1)} m")
+                print(f"4.  Optimization Mode: {sim.get('optimization_mode', 'grid')}")
+                if sim.get('optimization_mode') == 'adaptive':
+                    print(f"5.  Max Iterations: {sim.get('opt_max_iterations', 3)}")
+                    print(f"6.  Samples per Step: {sim.get('opt_samples_per_step', 10)}")
+                    print(f"7.  Target Step: {sim.get('opt_target_step', 0.01)} m")
+                print("B.  Back to main menu")
+                
+                sim_choice = input("\nSelect parameter to edit: ").upper()
+                if sim_choice == 'B':
+                    break
+                elif sim_choice == '1':
+                    sim['num_monte_carlo'] = int(_input("Monte Carlo runs", sim.get('num_monte_carlo', 100)))
+                elif sim_choice == '2':
+                    sim['altitude_search_range'] = float(_input("Search range (m)", sim.get('altitude_search_range', 10.0)))
+                elif sim_choice == '3':
+                    sim['altitude_step'] = float(_input("Altitude step (m)", sim.get('altitude_step', 0.1)))
+                elif sim_choice == '4':
+                    mode = _input("Optimization Mode (grid/adaptive)", sim.get('optimization_mode', 'grid')).lower()
+                    if mode in ['grid', 'adaptive']:
+                        sim['optimization_mode'] = mode
+                elif sim_choice == '5' and sim.get('optimization_mode') == 'adaptive':
+                    sim['opt_max_iterations'] = int(_input("Max iterations", sim.get('opt_max_iterations', 3)))
+                elif sim_choice == '6' and sim.get('optimization_mode') == 'adaptive':
+                    sim['opt_samples_per_step'] = int(_input("Samples per step", sim.get('opt_samples_per_step', 10)))
+                elif sim_choice == '7' and sim.get('optimization_mode') == 'adaptive':
+                    sim['opt_target_step'] = float(_input("Target step (m)", sim.get('opt_target_step', 0.01)))
         elif choice == '5':
             path = _input('Config file path', '')
             data = load_config_file(path)
@@ -669,6 +751,16 @@ def main():
     parser.add_argument('--roll', type=float, default=0.0, help='Initial Roll (deg)')
     parser.add_argument('--ignition-percent-offset', type=float, default=0.0, help='Ignition altitude percent offset (percent)')
     parser.add_argument('--ignition-hard-offset', type=float, default=0.0, help='Ignition altitude hard offset (m)')
+    
+    # Adaptive optimization arguments
+    parser.add_argument('--opt-mode', choices=['grid', 'adaptive'], default='grid', help='Optimization mode')
+    parser.add_argument('--opt-iters', type=int, default=3, help='Max iterations for adaptive optimization')
+    parser.add_argument('--opt-samples', type=int, default=10, help='Samples per step for adaptive optimization')
+    parser.add_argument('--opt-target', type=float, default=0.01, help='Target step size for adaptive optimization')
+    
+    # TVC mode arguments
+    parser.add_argument('--tvc-mode', choices=['orientation', 'velocity'], default='orientation', help='TVC control mode')
+    parser.add_argument('--tvc-drift-gain', type=float, default=0.1, help='Drift correction gain for Velocity mode')
 
     args = parser.parse_args()
 
@@ -680,9 +772,17 @@ def main():
         sim_overrides['altitude_search_range'] = args.search_range
     if args.altitude_step is not None:
         sim_overrides['altitude_step'] = args.altitude_step
+        
+    sim_overrides['optimization_mode'] = args.opt_mode
+    sim_overrides['opt_max_iterations'] = args.opt_iters
+    sim_overrides['opt_samples_per_step'] = args.opt_samples
+    sim_overrides['opt_target_step'] = args.opt_target
 
     sim_overrides['ignition_percent_offset'] = args.ignition_percent_offset / 100.0
     sim_overrides['ignition_hard_offset'] = args.ignition_hard_offset
+    
+    sim_overrides['tvc_mode'] = args.tvc_mode
+    sim_overrides['tvc_drift_gain'] = args.tvc_drift_gain
 
     # Handle Ascent/Orientation Logic
     if args.ascent:

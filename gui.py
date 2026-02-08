@@ -65,6 +65,7 @@ class SimulationGUI:
         self.create_rocket_tab()
         self.create_environment_tab()
         self.create_simulation_tab()
+        self.create_fault_injection_tab()
         self.create_run_tab()
         # Plots tab for embedded interactive figures
         self.create_plots_tab()
@@ -138,6 +139,24 @@ class SimulationGUI:
         ttk.Checkbutton(top, text="2D Altitude/Time", variable=self.chk_save_2d).pack(anchor='w', padx=20)
         ttk.Checkbutton(top, text="Velocity Profiles", variable=self.chk_save_vel).pack(anchor='w', padx=20)
         
+        ttk.Label(top, text="ML Model Paths:", font=("Arial", 10, "bold")).pack(anchor='w', padx=10, pady=(15,5))
+        
+        # Model
+        m_frame = ttk.Frame(top)
+        m_frame.pack(fill='x', padx=10)
+        ttk.Label(m_frame, text="Model (.keras):").pack(side='left')
+        self.ml_model_path_var = tk.StringVar(value='ignition_model_improved.keras')
+        ttk.Entry(m_frame, textvariable=self.ml_model_path_var).pack(side='left', fill='x', expand=True, padx=5)
+        ttk.Button(m_frame, text="...", width=3, command=lambda: self.ml_model_path_var.set(filedialog.askopenfilename(filetypes=[("Keras Model", "*.keras"), ("All Files", "*.*")]))).pack(side='right')
+
+        # Scaler
+        s_frame = ttk.Frame(top)
+        s_frame.pack(fill='x', padx=10, pady=5)
+        ttk.Label(s_frame, text="Scaler (.pkl):  ").pack(side='left')
+        self.ml_scaler_path_var = tk.StringVar(value='scaler_improved.pkl')
+        ttk.Entry(s_frame, textvariable=self.ml_scaler_path_var).pack(side='left', fill='x', expand=True, padx=5)
+        ttk.Button(s_frame, text="...", width=3, command=lambda: self.ml_scaler_path_var.set(filedialog.askopenfilename(filetypes=[("Pickle Scaler", "*.pkl"), ("All Files", "*.*")]))).pack(side='right')
+
         ttk.Button(top, text="Close", command=top.destroy).pack(pady=20)
 
     def open_about(self):
@@ -181,7 +200,7 @@ class SimulationGUI:
         """Non-blocking feasibility check for the UI banner"""
         try:
             # Lightweight check
-            rocket_config, env_config, sim_config = self.get_configs()
+            rocket_config, env_config, sim_config, fault_config, ml_config = self.get_configs()
             sim = SuicideBurnSimulation(rocket_config, env_config, sim_config)
             
             initial_v = self.initial_velocity.get()
@@ -282,33 +301,49 @@ class SimulationGUI:
         self.tvc_response_time = tk.DoubleVar(value=0.1)
         ttk.Entry(frame, textvariable=self.tvc_response_time).grid(row=1, column=1)
         
-        ttk.Label(frame, text="--- Pitch Control (Y-axis) ---").grid(row=2, column=0, columnspan=2, pady=(10,5))
+        ttk.Label(frame, text="TVC Control Mode:").grid(row=2, column=0, sticky='w')
+        self.tvc_mode = tk.StringVar(value='orientation')
+        self.cb_tvc_mode = ttk.Combobox(frame, textvariable=self.tvc_mode, 
+                                        values=['orientation', 'velocity'], state='readonly')
+        self.cb_tvc_mode.grid(row=2, column=1)
+        self.cb_tvc_mode.bind("<<ComboboxSelected>>", self._update_tvc_mode_visibility)
         
-        ttk.Label(frame, text="Kp (Proportional):").grid(row=3, column=0, sticky='w')
+        self.lbl_drift_gain = ttk.Label(frame, text="Drift Correction Gain:")
+        self.lbl_drift_gain.grid(row=3, column=0, sticky='w')
+        self.tvc_drift_gain = tk.DoubleVar(value=0.1)
+        self.ent_drift_gain = ttk.Entry(frame, textvariable=self.tvc_drift_gain)
+        self.ent_drift_gain.grid(row=3, column=1)
+        
+        ttk.Label(frame, text="--- Pitch Control (Y-axis) ---").grid(row=4, column=0, columnspan=2, pady=(10,5))
+        
+        ttk.Label(frame, text="Kp (Proportional):").grid(row=5, column=0, sticky='w')
         self.tvc_kp_pitch = tk.DoubleVar(value=0.5)
-        ttk.Entry(frame, textvariable=self.tvc_kp_pitch).grid(row=3, column=1)
+        ttk.Entry(frame, textvariable=self.tvc_kp_pitch).grid(row=5, column=1)
         
-        ttk.Label(frame, text="Ki (Integral):").grid(row=4, column=0, sticky='w')
+        ttk.Label(frame, text="Ki (Integral):").grid(row=6, column=0, sticky='w')
         self.tvc_ki_pitch = tk.DoubleVar(value=0.05)
-        ttk.Entry(frame, textvariable=self.tvc_ki_pitch).grid(row=4, column=1)
+        ttk.Entry(frame, textvariable=self.tvc_ki_pitch).grid(row=6, column=1)
         
-        ttk.Label(frame, text="Kd (Derivative):").grid(row=5, column=0, sticky='w')
+        ttk.Label(frame, text="Kd (Derivative):").grid(row=7, column=0, sticky='w')
         self.tvc_kd_pitch = tk.DoubleVar(value=0.1)
-        ttk.Entry(frame, textvariable=self.tvc_kd_pitch).grid(row=5, column=1)
+        ttk.Entry(frame, textvariable=self.tvc_kd_pitch).grid(row=7, column=1)
         
-        ttk.Label(frame, text="--- Yaw Control (X-axis) ---").grid(row=6, column=0, columnspan=2, pady=(10,5))
+        ttk.Label(frame, text="--- Yaw Control (X-axis) ---").grid(row=8, column=0, columnspan=2, pady=(10,5))
         
-        ttk.Label(frame, text="Kp (Proportional):").grid(row=7, column=0, sticky='w')
+        ttk.Label(frame, text="Kp (Proportional):").grid(row=9, column=0, sticky='w')
         self.tvc_kp_yaw = tk.DoubleVar(value=0.5)
-        ttk.Entry(frame, textvariable=self.tvc_kp_yaw).grid(row=7, column=1)
+        ttk.Entry(frame, textvariable=self.tvc_kp_yaw).grid(row=9, column=1)
         
-        ttk.Label(frame, text="Ki (Integral):").grid(row=8, column=0, sticky='w')
+        ttk.Label(frame, text="Ki (Integral):").grid(row=10, column=0, sticky='w')
         self.tvc_ki_yaw = tk.DoubleVar(value=0.05)
-        ttk.Entry(frame, textvariable=self.tvc_ki_yaw).grid(row=8, column=1)
+        ttk.Entry(frame, textvariable=self.tvc_ki_yaw).grid(row=10, column=1)
         
-        ttk.Label(frame, text="Kd (Derivative):").grid(row=9, column=0, sticky='w')
+        ttk.Label(frame, text="Kd (Derivative):").grid(row=11, column=0, sticky='w')
         self.tvc_kd_yaw = tk.DoubleVar(value=0.1)
-        ttk.Entry(frame, textvariable=self.tvc_kd_yaw).grid(row=9, column=1)
+        ttk.Entry(frame, textvariable=self.tvc_kd_yaw).grid(row=11, column=1)
+
+        # Initialize visibility
+        self._update_tvc_mode_visibility()
         
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
@@ -400,9 +435,11 @@ class SimulationGUI:
         self.altitude_search_range = tk.DoubleVar(value=10.0)
         ttk.Entry(frame, textvariable=self.altitude_search_range).grid(row=1, column=1)
         
-        ttk.Label(frame, text="Altitude Step (m):").grid(row=2, column=0, sticky='w')
+        self.lbl_altitude_step = ttk.Label(frame, text="Altitude Step (m):")
+        self.lbl_altitude_step.grid(row=2, column=0, sticky='w')
         self.altitude_step = tk.DoubleVar(value=0.1)
-        ttk.Entry(frame, textvariable=self.altitude_step).grid(row=2, column=1)
+        self.ent_altitude_step = ttk.Entry(frame, textvariable=self.altitude_step)
+        self.ent_altitude_step.grid(row=2, column=1)
 
         ttk.Label(frame, text="Ignition Percent Offset (%):").grid(row=3, column=0, sticky='w')
         self.ignition_percent_offset = tk.DoubleVar(value=0.0)
@@ -411,6 +448,34 @@ class SimulationGUI:
         ttk.Label(frame, text="Ignition Hard Offset (m):").grid(row=4, column=0, sticky='w')
         self.ignition_hard_offset = tk.DoubleVar(value=0.0)
         ttk.Entry(frame, textvariable=self.ignition_hard_offset).grid(row=4, column=1)
+
+        # Adaptive Optimization Settings (New)
+        ttk.Label(frame, text="Optimization Mode:").grid(row=5, column=0, sticky='w', pady=(10,0))
+        self.opt_mode = tk.StringVar(value="grid")
+        self.cb_opt_mode = ttk.Combobox(frame, textvariable=self.opt_mode, values=["grid", "adaptive"], state="readonly")
+        self.cb_opt_mode.grid(row=5, column=1, pady=(10,0))
+        self.cb_opt_mode.bind("<<ComboboxSelected>>", self._update_optimization_mode_visibility)
+
+        self.lbl_max_iters = ttk.Label(frame, text="Max Iterations (Adaptive):")
+        self.lbl_max_iters.grid(row=6, column=0, sticky='w')
+        self.opt_max_iterations = tk.IntVar(value=3)
+        self.ent_max_iters = ttk.Entry(frame, textvariable=self.opt_max_iterations)
+        self.ent_max_iters.grid(row=6, column=1)
+
+        self.lbl_samples = ttk.Label(frame, text="Samples per Step (Adaptive):")
+        self.lbl_samples.grid(row=7, column=0, sticky='w')
+        self.opt_samples_per_step = tk.IntVar(value=10)
+        self.ent_samples = ttk.Entry(frame, textvariable=self.opt_samples_per_step)
+        self.ent_samples.grid(row=7, column=1)
+
+        self.lbl_target_step = ttk.Label(frame, text="Target Step (m) (Adaptive):")
+        self.lbl_target_step.grid(row=8, column=0, sticky='w')
+        self.opt_target_step = tk.DoubleVar(value=0.01)
+        self.ent_target_step = ttk.Entry(frame, textvariable=self.opt_target_step)
+        self.ent_target_step.grid(row=8, column=1)
+        
+        # Initial visibility update
+        self._update_optimization_mode_visibility()
 
         # Ascent & Orientation
         frame_ascent = ttk.LabelFrame(tab, text="Flight Phase & Orientation", padding=10)
@@ -438,7 +503,7 @@ class SimulationGUI:
 
         # Toggle to show plots after run
         self.show_plots = tk.BooleanVar(value=False)
-        ttk.Checkbutton(frame, text="Show plots after run", variable=self.show_plots).grid(row=5, column=0, columnspan=2, sticky='w', pady=(5,0))
+        ttk.Checkbutton(frame, text="Show plots after run", variable=self.show_plots).grid(row=9, column=0, columnspan=2, sticky='w', pady=(5,0))
         
         # Variation parameters
         frame = ttk.LabelFrame(tab, text="Monte Carlo Variations", padding=10)
@@ -471,7 +536,508 @@ class SimulationGUI:
         ttk.Label(frame, text="Velocity Sensor Error (±):").grid(row=6, column=0, sticky='w')
         self.velocity_sensor_error = tk.DoubleVar(value=0.01)
         ttk.Entry(frame, textvariable=self.velocity_sensor_error).grid(row=6, column=1)
+
+        # Fault Injection Settings removed from Simulation tab; use the 'Fault Injection' tab instead
+
+    def create_faults_frame(self, tab):
+        """Legacy random in-flight faults removed.
+        Use the dedicated 'Fault Injection' tab for defining precise, ordered fault scenarios.
+        """
+        pass  # removed legacy UI to avoid duplication with Fault Injection tab
+        self.drag_change_prob = tk.DoubleVar(value=0.0)
+        ttk.Entry(frame, textvariable=self.drag_change_prob).grid(row=3, column=1)
         
+        ttk.Label(frame, text="Drag Multiplier (x):").grid(row=4, column=0, sticky='w')
+        self.drag_multiplier_fault = tk.DoubleVar(value=1.5)
+        ttk.Entry(frame, textvariable=self.drag_multiplier_fault).grid(row=4, column=1)
+        
+        # Thrust Anomaly
+        ttk.Label(frame, text="Thrust Anomaly Prob (0-1):").grid(row=5, column=0, sticky='w')
+        self.thrust_anomaly_prob = tk.DoubleVar(value=0.0)
+        ttk.Entry(frame, textvariable=self.thrust_anomaly_prob).grid(row=5, column=1)
+        
+        self.thrust_multiplier_fault = tk.DoubleVar(value=0.8)
+        ttk.Entry(frame, textvariable=self.thrust_multiplier_fault).grid(row=6, column=1)
+        
+        # ML Adaptive Toggle
+        self.use_ml_adaptive = tk.BooleanVar(value=False)
+        ttk.Checkbutton(frame, text="Use Adaptive ML Guidance (requires model)", variable=self.use_ml_adaptive).grid(row=7, column=0, columnspan=2, sticky='w', pady=(10,0))
+    
+    def create_fault_injection_tab(self):
+        """Create fault injection configuration tab with list-based ordering"""
+        tab = ttk.Frame(self.notebook)
+        self.notebook.add(tab, text="Fault Injection")
+        
+        # Initialize fault storage
+        self.fault_list = []  # List of fault dicts
+        self._group_colors = {}  # Map concurrent_group id -> color hex
+        self.fault_id_counter = 1
+        
+        # Top frame for enable/disable and ML model selection
+        top_frame = ttk.LabelFrame(tab, text="Fault Injection Settings", padding=10)
+        top_frame.pack(fill='x', padx=5, pady=5)
+        
+        self.faults_enabled = tk.BooleanVar(value=False)
+        ttk.Checkbutton(top_frame, text="Enable Fault Injection", variable=self.faults_enabled).grid(row=0, column=0, columnspan=2, sticky='w')
+        
+        # ML Flight Computer section
+        ml_frame = ttk.LabelFrame(top_frame, text="ML Flight Computer", padding=5)
+        ml_frame.grid(row=1, column=0, columnspan=2, sticky='ew', pady=(10,0))
+        
+        self.ml_fc_enabled = tk.BooleanVar(value=False)
+        ttk.Checkbutton(ml_frame, text="Enable ML Flight Computer", variable=self.ml_fc_enabled).grid(row=0, column=0, columnspan=3, sticky='w')
+        
+        ttk.Label(ml_frame, text="Model Path:").grid(row=1, column=0, sticky='w', pady=2)
+        self.ml_fc_model_path = tk.StringVar(value="ML/run_2/correction_model.keras")
+        ttk.Entry(ml_frame, textvariable=self.ml_fc_model_path, width=30).grid(row=1, column=1, sticky='ew', padx=5)
+        ttk.Button(ml_frame, text="Browse", command=self._browse_ml_model).grid(row=1, column=2)
+        
+        ttk.Label(ml_frame, text="Scaler Path:").grid(row=2, column=0, sticky='w', pady=2)
+        self.ml_fc_scaler_path = tk.StringVar(value="ML/run_2/correction_scalers.pkl")
+        ttk.Entry(ml_frame, textvariable=self.ml_fc_scaler_path, width=30).grid(row=2, column=1, sticky='ew', padx=5)
+        ttk.Button(ml_frame, text="Browse", command=self._browse_ml_scaler).grid(row=2, column=2)
+        
+        ttk.Label(ml_frame, text="Update Interval (s):").grid(row=3, column=0, sticky='w', pady=2)
+        self.ml_fc_update_interval = tk.DoubleVar(value=0.5)
+        ttk.Entry(ml_frame, textvariable=self.ml_fc_update_interval, width=15).grid(row=3, column=1, sticky='w', padx=5)
+        
+        ml_frame.columnconfigure(1, weight=1)
+        
+        # Fault list frame
+        list_frame = ttk.LabelFrame(tab, text="Fault Sequence", padding=10)
+        list_frame.pack(fill='both', expand=True, padx=5, pady=5)
+        
+        # Listbox with scrollbar
+        list_container = ttk.Frame(list_frame)
+        list_container.pack(side='left', fill='both', expand=True)
+        
+        scrollbar = ttk.Scrollbar(list_container)
+        scrollbar.pack(side='right', fill='y')
+        
+        # Multi-select enabled so users can group or operate on multiple faults
+        self.fault_listbox = tk.Listbox(list_container, yscrollcommand=scrollbar.set, height=10, selectmode=tk.EXTENDED, exportselection=False)
+        self.fault_listbox.pack(side='left', fill='both', expand=True)
+        scrollbar.config(command=self.fault_listbox.yview)
+        
+        # Bind selection
+        self.fault_listbox.bind('<<ListboxSelect>>', self._on_fault_select)
+        # Double-click an item to select its entire group or open edit for single faults
+        self.fault_listbox.bind('<Double-Button-1>', self._on_fault_double_click)
+        
+        # Control buttons
+        btn_frame = ttk.Frame(list_frame)
+        btn_frame.pack(side='right', fill='y', padx=(10,0))
+        
+        ttk.Button(btn_frame, text="Add Fault", command=self._add_fault_dialog).pack(fill='x', pady=2)
+        ttk.Button(btn_frame, text="Edit Fault", command=self._edit_fault_dialog).pack(fill='x', pady=2)
+        ttk.Button(btn_frame, text="Remove Fault", command=self._remove_fault).pack(fill='x', pady=2)
+        ttk.Separator(btn_frame, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Button(btn_frame, text="Move Up", command=self._move_fault_up).pack(fill='x', pady=2)
+        ttk.Button(btn_frame, text="Move Down", command=self._move_fault_down).pack(fill='x', pady=2)
+        ttk.Separator(btn_frame, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Button(btn_frame, text="Group as Concurrent", command=self._group_concurrent).pack(fill='x', pady=2)
+        ttk.Button(btn_frame, text="Select Group", command=self._select_group).pack(fill='x', pady=2)
+        ttk.Button(btn_frame, text="Clear All", command=self._clear_all_faults).pack(fill='x', pady=2)
+    
+    def _browse_ml_model(self):
+        """Browse for ML model file"""
+        filename = filedialog.askopenfilename(
+            title="Select ML Model",
+            filetypes=[("Keras Model", "*.keras"), ("H5 Model", "*.h5"), ("TFLite Model", "*.tflite"), ("All Files", "*.*")]
+        )
+        if filename:
+            self.ml_fc_model_path.set(filename)
+    
+    def _browse_ml_scaler(self):
+        """Browse for scaler file"""
+        filename = filedialog.askopenfilename(
+            title="Select Scaler File",
+            filetypes=[("Pickle File", "*.pkl"), ("All Files", "*.*")]
+        )
+        if filename:
+            self.ml_fc_scaler_path.set(filename)
+    
+    def _add_fault_dialog(self):
+        """Open dialog to add a new fault"""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Add Fault")
+        dialog.geometry("450x500")
+        
+        # Fault type
+        ttk.Label(dialog, text="Fault Type:").grid(row=0, column=0, sticky='w', padx=10, pady=5)
+        fault_type = tk.StringVar(value="mass_loss")
+        fault_types = ["mass_loss", "thrust_var", "drag_change", "wind_gust"]
+        ttk.Combobox(dialog, textvariable=fault_type, values=fault_types, state='readonly').grid(row=0, column=1, sticky='ew', padx=10)
+        
+        # Trigger mode
+        ttk.Label(dialog, text="Trigger Mode:").grid(row=1, column=0, sticky='w', padx=10, pady=5)
+        trigger_mode = tk.StringVar(value="absolute_time")
+        trigger_modes = ["absolute_time", "time_since_apogee", "altitude_threshold", "manual"]
+        ttk.Combobox(dialog, textvariable=trigger_mode, values=trigger_modes, state='readonly').grid(row=1, column=1, sticky='ew', padx=10)
+        
+        # Trigger value
+        ttk.Label(dialog, text="Trigger Value (s or m):").grid(row=2, column=0, sticky='w', padx=10, pady=5)
+        trigger_value = tk.DoubleVar(value=5.0)
+        ttk.Entry(dialog, textvariable=trigger_value).grid(row=2, column=1, sticky='ew', padx=10)
+        
+        # Magnitude
+        ttk.Label(dialog, text="Magnitude:").grid(row=3, column=0, sticky='w', padx=10, pady=5)
+        magnitude = tk.DoubleVar(value=1.0)
+        ttk.Entry(dialog, textvariable=magnitude).grid(row=3, column=1, sticky='ew', padx=10)
+        
+        ttk.Label(dialog, text="(mass_loss: kg to lose (negative),\nthrust/drag: multiplier,\nwind_gust: m/s)", 
+                 font=("Arial", 8), foreground="gray").grid(row=4, column=0, columnspan=2, sticky='w', padx=10)
+        
+        # Duration
+        ttk.Label(dialog, text="Duration (s, 0=permanent):").grid(row=5, column=0, sticky='w', padx=10, pady=5)
+        duration = tk.DoubleVar(value=0.0)
+        ttk.Entry(dialog, textvariable=duration).grid(row=5, column=1, sticky='ew', padx=10)
+        
+        # Target
+        ttk.Label(dialog, text="Target:").grid(row=6, column=0, sticky='w', padx=10, pady=5)
+        target = tk.StringVar(value="simulated_state")
+        targets = ["simulated_state", "sensor_only"]
+        ttk.Combobox(dialog, textvariable=target, values=targets, state='readonly').grid(row=6, column=1, sticky='ew', padx=10)
+        
+        # Randomize magnitude
+        randomize = tk.BooleanVar(value=False)
+        ttk.Checkbutton(dialog, text="Randomize Magnitude", variable=randomize).grid(row=7, column=0, columnspan=2, sticky='w', padx=10, pady=5)
+        
+        # Magnitude range
+        ttk.Label(dialog, text="Magnitude Range (min):").grid(row=8, column=0, sticky='w', padx=10, pady=2)
+        mag_min = tk.DoubleVar(value=0.8)
+        ttk.Entry(dialog, textvariable=mag_min).grid(row=8, column=1, sticky='ew', padx=10)
+        
+        ttk.Label(dialog, text="Magnitude Range (max):").grid(row=9, column=0, sticky='w', padx=10, pady=2)
+        mag_max = tk.DoubleVar(value=1.2)
+        ttk.Entry(dialog, textvariable=mag_max).grid(row=9, column=1, sticky='ew', padx=10)
+        
+        # Probability
+        ttk.Label(dialog, text="Probability (0-1):").grid(row=10, column=0, sticky='w', padx=10, pady=5)
+        probability = tk.DoubleVar(value=1.0)
+        ttk.Entry(dialog, textvariable=probability).grid(row=10, column=1, sticky='ew', padx=10)
+        
+        # Buttons
+        btn_frame = ttk.Frame(dialog)
+        btn_frame.grid(row=11, column=0, columnspan=2, pady=20)
+        
+        def add_fault():
+            fault = {
+                'fault_type': fault_type.get(),
+                'trigger_mode': trigger_mode.get(),
+                'trigger_value': trigger_value.get(),
+                'magnitude': magnitude.get(),
+                'duration': duration.get(),
+                'target': target.get(),
+                'randomize_magnitude': randomize.get(),
+                'magnitude_range': [mag_min.get(), mag_max.get()],
+                'probability': probability.get(),
+                'fault_id': self.fault_id_counter,
+                'concurrent_group': None
+            }
+            self.fault_list.append(fault)
+            self.fault_id_counter += 1
+            self._refresh_fault_listbox()
+            dialog.destroy()
+        
+        ttk.Button(btn_frame, text="Add", command=add_fault).pack(side='left', padx=5)
+        ttk.Button(btn_frame, text="Cancel", command=dialog.destroy).pack(side='left', padx=5)
+        
+        dialog.columnconfigure(1, weight=1)
+    
+    def _edit_fault_dialog(self):
+        """Edit selected fault"""
+        selection = self.fault_listbox.curselection()
+        if not selection:
+            messagebox.showwarning("No Selection", "Please select a fault to edit")
+            return
+        if len(selection) != 1:
+            messagebox.showwarning("Selection Error", "Please select exactly one fault to edit")
+            return
+        
+        idx = selection[0]
+        fault = self.fault_list[idx]
+        
+        # Similar dialog to add, but pre-populated
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Edit Fault")
+        dialog.geometry("450x500")
+        
+        # Fault type
+        ttk.Label(dialog, text="Fault Type:").grid(row=0, column=0, sticky='w', padx=10, pady=5)
+        fault_type = tk.StringVar(value=fault['fault_type'])
+        fault_types = ["mass_loss", "thrust_var", "drag_change", "wind_gust"]
+        ttk.Combobox(dialog, textvariable=fault_type, values=fault_types, state='readonly').grid(row=0, column=1, sticky='ew', padx=10)
+        
+        # Trigger mode
+        ttk.Label(dialog, text="Trigger Mode:").grid(row=1, column=0, sticky='w', padx=10, pady=5)
+        trigger_mode = tk.StringVar(value=fault['trigger_mode'])
+        trigger_modes = ["absolute_time", "time_since_apogee", "altitude_threshold", "manual"]
+        ttk.Combobox(dialog, textvariable=trigger_mode, values=trigger_modes, state='readonly').grid(row=1, column=1, sticky='ew', padx=10)
+        
+        # Trigger value
+        ttk.Label(dialog, text="Trigger Value (s or m):").grid(row=2, column=0, sticky='w', padx=10, pady=5)
+        trigger_value = tk.DoubleVar(value=fault['trigger_value'])
+        ttk.Entry(dialog, textvariable=trigger_value).grid(row=2, column=1, sticky='ew', padx=10)
+        
+        # Magnitude
+        ttk.Label(dialog, text="Magnitude:").grid(row=3, column=0, sticky='w', padx=10, pady=5)
+        magnitude = tk.DoubleVar(value=fault['magnitude'])
+        ttk.Entry(dialog, textvariable=magnitude).grid(row=3, column=1, sticky='ew', padx=10)
+        
+        ttk.Label(dialog, text="(mass_loss: kg to lose (negative),\nthrust/drag: multiplier,\nwind_gust: m/s)", 
+                 font=("Arial", 8), foreground="gray").grid(row=4, column=0, columnspan=2, sticky='w', padx=10)
+        
+        # Duration
+        ttk.Label(dialog, text="Duration (s, 0=permanent):").grid(row=5, column=0, sticky='w', padx=10, pady=5)
+        duration = tk.DoubleVar(value=fault['duration'])
+        ttk.Entry(dialog, textvariable=duration).grid(row=5, column=1, sticky='ew', padx=10)
+        
+        # Target
+        ttk.Label(dialog, text="Target:").grid(row=6, column=0, sticky='w', padx=10, pady=5)
+        target = tk.StringVar(value=fault['target'])
+        targets = ["simulated_state", "sensor_only"]
+        ttk.Combobox(dialog, textvariable=target, values=targets, state='readonly').grid(row=6, column=1, sticky='ew', padx=10)
+        
+        # Randomize magnitude
+        randomize = tk.BooleanVar(value=fault.get('randomize_magnitude', False))
+        ttk.Checkbutton(dialog, text="Randomize Magnitude", variable=randomize).grid(row=7, column=0, columnspan=2, sticky='w', padx=10, pady=5)
+        
+        # Magnitude range
+        ttk.Label(dialog, text="Magnitude Range (min):").grid(row=8, column=0, sticky='w', padx=10, pady=2)
+        mag_min = tk.DoubleVar(value=fault.get('magnitude_range', [0.8, 1.2])[0])
+        ttk.Entry(dialog, textvariable=mag_min).grid(row=8, column=1, sticky='ew', padx=10)
+        
+        ttk.Label(dialog, text="Magnitude Range (max):").grid(row=9, column=0, sticky='w', padx=10, pady=2)
+        mag_max = tk.DoubleVar(value=fault.get('magnitude_range', [0.8, 1.2])[1])
+        ttk.Entry(dialog, textvariable=mag_max).grid(row=9, column=1, sticky='ew', padx=10)
+        
+        # Probability
+        ttk.Label(dialog, text="Probability (0-1):").grid(row=10, column=0, sticky='w', padx=10, pady=5)
+        probability = tk.DoubleVar(value=fault.get('probability', 1.0))
+        ttk.Entry(dialog, textvariable=probability).grid(row=10, column=1, sticky='ew', padx=10)
+        
+        # Buttons
+        btn_frame = ttk.Frame(dialog)
+        btn_frame.grid(row=11, column=0, columnspan=2, pady=20)
+        
+        def save_fault():
+            self.fault_list[idx] = {
+                'fault_type': fault_type.get(),
+                'trigger_mode': trigger_mode.get(),
+                'trigger_value': trigger_value.get(),
+                'magnitude': magnitude.get(),
+                'duration': duration.get(),
+                'target': target.get(),
+                'randomize_magnitude': randomize.get(),
+                'magnitude_range': [mag_min.get(), mag_max.get()],
+                'probability': probability.get(),
+                'fault_id': fault['fault_id'],
+                'concurrent_group': fault.get('concurrent_group')
+            }
+            self._refresh_fault_listbox()
+            dialog.destroy()
+        
+        ttk.Button(btn_frame, text="Save", command=save_fault).pack(side='left', padx=5)
+        ttk.Button(btn_frame, text="Cancel", command=dialog.destroy).pack(side='left', padx=5)
+        
+        dialog.columnconfigure(1, weight=1)
+    
+    def _remove_fault(self):
+        """Remove selected fault(s)"""
+        selection = self.fault_listbox.curselection()
+        if not selection:
+            messagebox.showwarning("No Selection", "Please select one or more faults to remove")
+            return
+        
+        # Delete from highest index to lowest to avoid reindexing issues
+        for idx in sorted(selection, reverse=True):
+            del self.fault_list[idx]
+        self._refresh_fault_listbox()
+    
+    def _move_fault_up(self):
+        """Move selected fault or contiguous block up in the list"""
+        selection = self.fault_listbox.curselection()
+        if not selection:
+            return
+        indices = sorted(selection)
+        if indices[0] == 0:
+            return  # Can't move past top
+        # Require contiguous block for multi-move
+        if len(indices) > 1 and (indices[-1] - indices[0] + 1) != len(indices):
+            messagebox.showwarning("Selection Error", "Please select a contiguous block to move")
+            return
+        # Extract block
+        block = [self.fault_list[i] for i in indices]
+        # Remove existing entries from highest index to lowest
+        for i in reversed(indices):
+            del self.fault_list[i]
+        insert_at = indices[0] - 1
+        for j, item in enumerate(block):
+            self.fault_list.insert(insert_at + j, item)
+        self._refresh_fault_listbox()
+        # Restore selection on moved block
+        for j in range(len(block)):
+            self.fault_listbox.selection_set(insert_at + j)
+    
+    def _move_fault_down(self):
+        """Move selected fault or contiguous block down in the list"""
+        selection = self.fault_listbox.curselection()
+        if not selection:
+            return
+        indices = sorted(selection)
+        if indices[-1] >= len(self.fault_list) - 1:
+            return  # Can't move past bottom
+        # Require contiguous block for multi-move
+        if len(indices) > 1 and (indices[-1] - indices[0] + 1) != len(indices):
+            messagebox.showwarning("Selection Error", "Please select a contiguous block to move")
+            return
+        block = [self.fault_list[i] for i in indices]
+        for i in reversed(indices):
+            del self.fault_list[i]
+        insert_at = indices[0] + 1
+        for j, item in enumerate(block):
+            self.fault_list.insert(insert_at + j, item)
+        self._refresh_fault_listbox()
+        # Restore selection on moved block
+        for j in range(len(block)):
+            self.fault_listbox.selection_set(insert_at + j)
+    
+    def _group_concurrent(self):
+        """Group selected faults as concurrent and assign a visual color"""
+        selection = self.fault_listbox.curselection()
+        if len(selection) < 2:
+            messagebox.showwarning("Selection Required", "Please select 2 or more faults to group as concurrent")
+            return
+        
+        # Assign same concurrent group ID to selected faults
+        group_id = max([f.get('concurrent_group', 0) for f in self.fault_list], default=0) + 1
+        
+        for idx in selection:
+            self.fault_list[idx]['concurrent_group'] = group_id
+        
+        # Assign a color for visual grouping if new
+        palette = ['#FFD700','#ADFF2F','#87CEFA','#FFA07A','#DA70D6','#98FB98','#FFB6C1','#87CEEB']
+        if group_id not in self._group_colors:
+            self._group_colors[group_id] = palette[(group_id - 1) % len(palette)]
+        
+        self._refresh_fault_listbox()
+        messagebox.showinfo("Grouped", f"Selected faults grouped as concurrent (Group {group_id})")
+    
+    def _clear_all_faults(self):
+        """Clear all faults"""
+        if messagebox.askyesno("Confirm", "Clear all faults?"):
+            self.fault_list = []
+            self._refresh_fault_listbox()
+    
+    def _on_fault_select(self, event):
+        """Handle fault selection (placeholder)"""
+        # Currently no special handling on selection; reserved for future UI updates
+        return
+    
+    def _select_group(self):
+        """Select all faults that belong to the same concurrent group as the current selection"""
+        selection = self.fault_listbox.curselection()
+        if not selection:
+            messagebox.showwarning("No Selection", "Please select a fault inside a group to select the entire group")
+            return
+        idx = selection[0]
+        group_id = self.fault_list[idx].get('concurrent_group')
+        if not group_id:
+            messagebox.showwarning("Not in Group", "Selected fault is not part of a concurrent group.")
+            return
+        self._select_group_by_id(group_id)
+    
+    def _select_group_by_id(self, group_id):
+        indices = [i for i, f in enumerate(self.fault_list) if f.get('concurrent_group') == group_id]
+        if not indices:
+            messagebox.showwarning("Group Not Found", f"No faults found for Group {group_id}")
+            return
+        self.fault_listbox.selection_clear(0, tk.END)
+        for i in indices:
+            self.fault_listbox.selection_set(i)
+    
+    def _on_fault_double_click(self, event):
+        """Double-click to select whole group or edit single fault"""
+        idx = self.fault_listbox.nearest(event.y)
+        if idx is None or idx >= len(self.fault_list):
+            return
+        group_id = self.fault_list[idx].get('concurrent_group')
+        if group_id:
+            self._select_group_by_id(group_id)
+        else:
+            # Single fault - open edit dialog
+            self.fault_listbox.selection_clear(0, tk.END)
+            self.fault_listbox.selection_set(idx)
+            self._edit_fault_dialog()
+    
+    def _refresh_fault_listbox(self):
+        """Refresh the fault listbox display"""
+        self.fault_listbox.delete(0, tk.END)
+        
+        for i, fault in enumerate(self.fault_list):
+            # Format display string
+            concurrent = f" [Group {fault['concurrent_group']}]" if fault.get('concurrent_group') else ""
+            display = f"{i+1}. {fault['fault_type']} @ {fault['trigger_mode']}={fault['trigger_value']:.1f}{concurrent}"
+            self.fault_listbox.insert(tk.END, display)
+            # Color grouped faults for visual clarity
+            group_id = fault.get('concurrent_group')
+            if group_id:
+                color = self._group_colors.get(group_id, '#f0f0f0')
+                try:
+                    self.fault_listbox.itemconfig(i, bg=color)
+                except Exception:
+                    # Some Tk versions may not support itemconfig/bg; ignore gracefully
+                    pass
+    
+    def _get_fault_config(self):
+        """Build fault configuration from GUI fault list"""
+        from faults import FaultGroup
+        
+        if not self.faults_enabled.get() or not self.fault_list:
+            return {
+                'enabled': False,
+                'fault_groups': []
+            }
+        
+        # Group faults by concurrent_group
+        groups = {}
+        for fault in self.fault_list:
+            group_id = fault.get('concurrent_group', None)
+            if group_id is None:
+                # Individual fault (sequential)
+                group_id = f"solo_{fault['fault_id']}"
+                concurrent = False
+            else:
+                concurrent = True
+            
+            if group_id not in groups:
+                groups[group_id] = {'faults': [], 'concurrent': concurrent}
+            groups[group_id]['faults'].append(fault)
+        
+        # Build fault groups
+        fault_groups = []
+        for group_id, group_data in groups.items():
+            fault_groups.append({
+                'faults': group_data['faults'],
+                'concurrent': group_data['concurrent'],
+                'group_id': hash(group_id) % 10000  # Simple numeric ID
+            })
+        
+        return {
+            'enabled': True,
+            'fault_groups': fault_groups
+        }
+    
+    def _get_ml_flight_computer_config(self):
+        """Build ML flight computer configuration from GUI"""
+        return {
+            'enabled': self.ml_fc_enabled.get(),
+            'model_path': self.ml_fc_model_path.get() if self.ml_fc_enabled.get() else None,
+            'scaler_path': self.ml_fc_scaler_path.get() if self.ml_fc_enabled.get() else None,
+            'update_interval': self.ml_fc_update_interval.get()
+        }
+    
     def create_run_tab(self):
         """Create run simulation tab"""
         tab = ttk.Frame(self.notebook)
@@ -521,7 +1087,7 @@ class SimulationGUI:
         """Check if landing is physically possible"""
         try:
             # Get configurations
-            rocket_config, environment_config, simulation_config = self.get_configs()
+            rocket_config, environment_config, simulation_config, fault_config, ml_config = self.get_configs()
             
             # Create simulation (lightweight)
             sim = SuicideBurnSimulation(rocket_config, environment_config, simulation_config)
@@ -636,6 +1202,8 @@ class SimulationGUI:
             'tvc_response_variation': self.tvc_response_variation.get(),
             'mass_variation': self.mass_variation.get(),
             'ascent_motor_casing_mass': self.ascent_motor_casing_mass.get(),
+            'tvc_mode': self.tvc_mode.get(),
+            'tvc_drift_gain': self.tvc_drift_gain.get()
         }
         
         environment_config = {
@@ -663,7 +1231,19 @@ class SimulationGUI:
             'ignition_hard_offset': self.ignition_hard_offset.get(),
             'show_plots': self.show_plots.get(),
             'simulate_ascent': self.simulate_ascent.get(),
+            'optimization_mode': self.opt_mode.get(),
+            'opt_max_iterations': self.opt_max_iterations.get(),
+            'opt_samples_per_step': self.opt_samples_per_step.get(),
+            'opt_target_step': self.opt_target_step.get(),
+            'opt_samples_per_step': self.opt_samples_per_step.get(),
+            'opt_target_step': self.opt_target_step.get(),
+            'use_ml_adaptive': getattr(self, 'use_ml_adaptive', tk.BooleanVar(value=False)).get(),
+            'ml_model_path': getattr(self, 'ml_model_path_var', tk.StringVar(value='ignition_model_improved.keras')).get(),
+            'ml_scaler_path': getattr(self, 'ml_scaler_path_var', tk.StringVar(value='scaler_improved.pkl')).get(),
         }
+
+        # Legacy simple random faults removed — use the 'Fault Injection' tab. The
+        # detailed fault configuration is returned separately as `fault_config` below.
         
         # Map GUI orientation fields to correct config based on mode
         if self.simulate_ascent.get():
@@ -676,7 +1256,13 @@ class SimulationGUI:
             sim_config['descent_initial_yaw'] = self.start_yaw.get()
             sim_config['descent_initial_roll'] = self.start_roll.get()
         
-        return rocket_config, environment_config, sim_config
+        # Add fault configuration from new tab
+        fault_config = self._get_fault_config() if hasattr(self, '_get_fault_config') else {'enabled': False, 'fault_groups': []}
+        
+        # Add ML flight computer configuration from new tab
+        ml_config = self._get_ml_flight_computer_config() if hasattr(self, '_get_ml_flight_computer_config') else {'enabled': False}
+        
+        return rocket_config, environment_config, sim_config, fault_config, ml_config
         
     def update_orientation_labels(self):
         """Update labels based on ascent checkbox"""
@@ -684,6 +1270,41 @@ class SimulationGUI:
             self.lbl_orientation.config(text="Launch Pad Orientation (deg):")
         else:
             self.lbl_orientation.config(text="Burn Start Orientation (deg):")
+
+    def _update_optimization_mode_visibility(self, event=None):
+        """Show/hide fields based on optimization mode"""
+        mode = self.opt_mode.get()
+        if mode == "adaptive":
+            # Show adaptive, hide grid step
+            self.lbl_altitude_step.grid_remove()
+            self.ent_altitude_step.grid_remove()
+            
+            self.lbl_max_iters.grid()
+            self.ent_max_iters.grid()
+            self.lbl_samples.grid()
+            self.ent_samples.grid()
+            self.lbl_target_step.grid()
+            self.ent_target_step.grid()
+        else:
+            # Show grid step, hide adaptive
+            self.lbl_altitude_step.grid()
+            self.ent_altitude_step.grid()
+            
+            self.lbl_max_iters.grid_remove()
+            self.ent_max_iters.grid_remove()
+            self.lbl_samples.grid_remove()
+            self.ent_samples.grid_remove()
+            self.lbl_target_step.grid_remove()
+            self.ent_target_step.grid_remove()
+
+    def _update_tvc_mode_visibility(self, event=None):
+        mode = self.tvc_mode.get()
+        if mode == 'velocity':
+            self.lbl_drift_gain.grid()
+            self.ent_drift_gain.grid()
+        else:
+            self.lbl_drift_gain.grid_remove()
+            self.ent_drift_gain.grid_remove()
     
     def log(self, message):
         """Log message to output text widget"""
@@ -738,12 +1359,20 @@ class SimulationGUI:
             self.log("Starting optimization...")
             
             # Get configurations
-            rocket_config, environment_config, simulation_config = self.get_configs()
+            rocket_config, environment_config, simulation_config, fault_config, ml_config = self.get_configs()
             
-            # Create simulation
-            self.simulation = SuicideBurnSimulation(
-                rocket_config, environment_config, simulation_config
-            )
+            # Create simulation (use EnhancedSimulation if faults or ML enabled)
+            from simulation_wrapper import EnhancedSimulation
+            if fault_config.get('enabled') or ml_config.get('enabled'):
+                self.log("Using enhanced simulation with fault injection and/or ML flight computer...")
+                self.simulation = EnhancedSimulation(
+                    rocket_config, environment_config, simulation_config,
+                    fault_config, ml_config
+                ).simulation  # Access wrapped simulation for compatibility
+            else:
+                self.simulation = SuicideBurnSimulation(
+                    rocket_config, environment_config, simulation_config
+                )
             
             # Initial state
             initial_altitude = self.initial_altitude.get()
@@ -759,6 +1388,7 @@ class SimulationGUI:
             
             # Reset progress UI
             self._update_progress(0, 0)
+            best_history = None
 
             # Create results folder up-front so per-trial outputs can be written during optimization
             results_folder, ts = self._make_results_subfolder('optimization')
@@ -767,16 +1397,33 @@ class SimulationGUI:
             self._save_config_to_folder(results_folder)
 
             # Run optimization (pass GUI progress callback), save per-trial CSVs and PNGs
-            optimal_altitude, success_rates, best_history = self.simulation.optimize_ignition_altitude(
-                initial_state,
-                simulation_config['num_monte_carlo'],
-                simulation_config['altitude_search_range'],
-                simulation_config['altitude_step'],
-                progress_callback=self._progress_callback,
-                save_each_trial=True,
-                results_folder=results_folder,
-                save_plots_per_trial=True
-            )
+            if simulation_config.get('optimization_mode', 'grid') == 'adaptive':
+                optimal_altitude, convergence_history, best_history = self.simulation.optimize_ignition_altitude_adaptive(
+                    initial_state,
+                    num_monte_carlo=simulation_config['num_monte_carlo'],
+                    altitude_search_range=simulation_config['altitude_search_range'],
+                    max_iterations=simulation_config.get('opt_max_iterations', 3),
+                    samples_per_step=simulation_config.get('opt_samples_per_step', 10),
+                    target_step=simulation_config.get('opt_target_step', 0.01),
+                    progress_callback=self._progress_callback,
+                    save_each_trial=True,
+                    results_folder=results_folder,
+                    save_plots_per_trial=True
+                )
+                # For summary plotting/saving, we create a dict with at least the best result
+                success_rates = {optimal_altitude: 1.0 if (best_history and best_history.get('success')) else 0.0}
+            else:
+                optimal_altitude, success_rates, best_history = self.simulation.optimize_ignition_altitude(
+                    initial_state,
+                    simulation_config['num_monte_carlo'],
+                    simulation_config['altitude_search_range'],
+                    simulation_config['altitude_step'],
+                    progress_callback=self._progress_callback,
+                    save_each_trial=True,
+                    results_folder=results_folder,
+                    save_plots_per_trial=True
+                )
+                best_history = best_history # For clarity
             
             self.log(f"\nOptimal ignition altitude: {optimal_altitude:.2f} m")
             
@@ -812,12 +1459,24 @@ class SimulationGUI:
 
             
             # Get configurations
-            rocket_config, environment_config, simulation_config = self.get_configs()
+            rocket_config, environment_config, simulation_config, fault_config, ml_config = self.get_configs()
             
-            # Create simulation
-            self.simulation = SuicideBurnSimulation(
-                rocket_config, environment_config, simulation_config
-            )
+            # Create simulation (use EnhancedSimulation if faults or ML enabled)
+            from simulation_wrapper import EnhancedSimulation
+            if fault_config.get('enabled') or ml_config.get('enabled'):
+                self.log("Using enhanced simulation with fault injection and/or ML flight computer...")
+                enhanced_sim = EnhancedSimulation(
+                    rocket_config, environment_config, simulation_config,
+                    fault_config, ml_config
+                )
+                self.simulation = enhanced_sim.simulation  # For compatibility
+                use_enhanced = True
+            else:
+                self.simulation = SuicideBurnSimulation(
+                    rocket_config, environment_config, simulation_config
+                )
+                enhanced_sim = None
+                use_enhanced = False
             
             # Initial state
             initial_altitude = self.initial_altitude.get()
@@ -834,12 +1493,18 @@ class SimulationGUI:
             # Run simulation
             # Passing ignition_altitude=None allows the simulation to calculate it 
             # dynamically based on apogee if simulate_ascent is True.
-            success, final_state, history = self.simulation.run_simulation(
-                initial_state, None
-            )
+            if use_enhanced:
+                assert enhanced_sim is not None, "Enhanced simulation should be initialized"
+                history = enhanced_sim.run_simulation(initial_state, None)
+                success = history.get('success', False)
+                final_state = None  # Not needed for enhanced sim
+            else:
+                success, final_state, history = self.simulation.run_simulation(
+                    initial_state, None
+                )
             
             # Ignition altitude used (can be retrieved from history)
-            actual_ignition_altitude = history.get('ignition_altitude', 0.0)
+            actual_ignition_altitude = history.get('ignition_altitude', 0.0) if isinstance(history, dict) else 0.0
             self.log(f"Calculated ignition altitude: {actual_ignition_altitude:.2f} m")
             
             self.log(f"Success: {success}")
@@ -871,11 +1536,13 @@ class SimulationGUI:
         """Save current GUI configuration to a JSON file in the specified folder"""
         try:
             import json
-            rocket_config, env_config, sim_config = self.get_configs()
+            rocket_config, env_config, sim_config, fault_config, ml_config = self.get_configs()
             full_config = {
                 "rocket": rocket_config,
                 "environment": env_config,
-                "simulation": sim_config
+                "simulation": sim_config,
+                "faults": fault_config,
+                "ml_flight_computer": ml_config
             }
             config_path = os.path.join(folder, 'config.json')
             with open(config_path, 'w') as f:
@@ -1279,13 +1946,15 @@ class SimulationGUI:
         if filename:
             try:
                 import json
-                rocket_config, env_config, sim_config = self.get_configs()
+                rocket_config, env_config, sim_config, fault_config, ml_config = self.get_configs()
                 
                 # Combine into one interchangeable config
                 full_config = {
                     "rocket": rocket_config,
                     "environment": env_config,
-                    "simulation": sim_config
+                    "simulation": sim_config,
+                    "faults": fault_config,
+                    "ml_flight_computer": ml_config
                 }
                 
                 with open(filename, 'w') as f:
@@ -1329,6 +1998,11 @@ class SimulationGUI:
                 if 'thrust_variation' in rocket: self.thrust_variation.set(rocket['thrust_variation'])
                 if 'tvc_response_variation' in rocket: self.tvc_response_variation.set(rocket['tvc_response_variation'])
                 if 'mass_variation' in rocket: self.mass_variation.set(rocket['mass_variation'])
+                if 'tvc_mode' in rocket: self.tvc_mode.set(rocket['tvc_mode'])
+                if 'tvc_drift_gain' in rocket: self.tvc_drift_gain.set(rocket['tvc_drift_gain'])
+                
+                # Update TVC visibility
+                self._update_tvc_mode_visibility()
                 
                 if 'thrust_curve' in rocket:
                     self.thrust_curve.delete('1.0', 'end')
@@ -1358,6 +2032,50 @@ class SimulationGUI:
                 if 'ignition_hard_offset' in sim: self.ignition_hard_offset.set(sim['ignition_hard_offset'])
                 if 'show_plots' in sim: self.show_plots.set(sim['show_plots'])
                 if 'simulate_ascent' in sim: self.simulate_ascent.set(sim['simulate_ascent'])
+                
+                # Adaptive optimization parameters
+                if 'optimization_mode' in sim: self.opt_mode.set(sim['optimization_mode'])
+                if 'opt_max_iterations' in sim: self.opt_max_iterations.set(sim['opt_max_iterations'])
+                if 'opt_samples_per_step' in sim: self.opt_samples_per_step.set(sim['opt_samples_per_step'])
+                if 'opt_target_step' in sim: self.opt_target_step.set(sim['opt_target_step'])
+                
+                # Update ML paths if in config
+                if 'ml_model_path' in sim: 
+                    if not hasattr(self, 'ml_model_path_var'): self.ml_model_path_var = tk.StringVar()
+                    self.ml_model_path_var.set(sim['ml_model_path'])
+                if 'ml_scaler_path' in sim:
+                    if not hasattr(self, 'ml_scaler_path_var'): self.ml_scaler_path_var = tk.StringVar()
+                    self.ml_scaler_path_var.set(sim['ml_scaler_path'])
+
+                # Update visibility
+                self._update_optimization_mode_visibility()
+                
+                # Load faults configuration
+                if 'faults' in config:
+                    faults = config['faults']
+                    if hasattr(self, 'faults_enabled'):
+                        self.faults_enabled.set(faults.get('enabled', False))
+                    if hasattr(self, 'fault_list') and 'fault_groups' in faults:
+                        # Clear existing faults
+                        self.fault_list = []
+                        # Load faults from groups
+                        for group in faults['fault_groups']:
+                            for fault in group['faults']:
+                                self.fault_list.append(fault)
+                        if hasattr(self, '_refresh_fault_listbox'):
+                            self._refresh_fault_listbox()
+                
+                # Load ML flight computer configuration
+                if 'ml_flight_computer' in config:
+                    ml = config['ml_flight_computer']
+                    if hasattr(self, 'ml_fc_enabled'):
+                        self.ml_fc_enabled.set(ml.get('enabled', False))
+                    if hasattr(self, 'ml_fc_model_path') and 'model_path' in ml and ml['model_path']:
+                        self.ml_fc_model_path.set(ml['model_path'])
+                    if hasattr(self, 'ml_fc_scaler_path') and 'scaler_path' in ml and ml['scaler_path']:
+                        self.ml_fc_scaler_path.set(ml['scaler_path'])
+                    if hasattr(self, 'ml_fc_update_interval') and 'update_interval' in ml:
+                        self.ml_fc_update_interval.set(ml['update_interval'])
                 
                 # Start angles
                 if sim.get('simulate_ascent'):
