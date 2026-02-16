@@ -3,7 +3,20 @@
     "default_rocket_stl": "C:/Users/rishi/Downloads/ImageToStl.com_sketch-mockup.stl",
     "flame_stl_path": "C:/Users/rishi/Downloads/rocket_flame_cm.stl",
     "explosion_stl_path": "assets\\Dramatic_explosion_effect_part.stl",
-    "lat_scale": "10.0",
+    "lat_scale": "25.0",
     "scale_lat_enabled": true,
-    "playback_speed": "0.1x"
+    "vert_scale": "10.0",
+    "scale_vert_enabled": true,
+    "playback_speed": "0.1x",
+    "launch_lat": 32.99,
+    "launch_lon": -106.975,
+    "map_api_key": "",
+    "map_zoom": 14,
+    "map_enabled": true,
+    "camera_mode": "Free",
+    "enable_ssao": true,
+    "enable_shadows": false,
+    "show_trail": true,
+    "mesh_decimate_target": 0.5,
+    "mesh_decimate_threshold": 50000
 }
