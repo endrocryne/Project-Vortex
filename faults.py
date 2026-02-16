@@ -429,6 +429,173 @@ class FaultInjectionManager:
         return FaultInjectionManager(groups)
 
 
+def calculate_fault_intensity(fault: FaultConfig, 
+                            typical_descent_time: float = 10.0,
+                            typical_altitude: float = 1000.0,
+                            reference_mass: float = 60.0) -> float:
+    """
+    Calculate normalized fault intensity (0-1 scale) representing the impact on landing ability.
+    
+    The intensity formula considers:
+    - Base magnitude impact (fault-type specific)
+    - Timing criticality (when fault occurs in flight profile)
+    - Duration severity (how long the fault persists)
+    - Probability of occurrence
+    
+    Mathematical Formula:
+    I = P × (B × T × D)^0.5
+    
+    Where:
+    - P = Probability of occurrence [0, 1]
+    - B = Base intensity from magnitude [0, 1]
+    - T = Timing criticality factor [0.5, 2.0]
+    - D = Duration severity factor [0.5, 2.0]
+    
+    The square root dampens extreme values while preserving relative ordering.
+    Final result is clamped to [0, 1] range.
+    
+    Args:
+        fault: FaultConfig object
+        typical_descent_time: Expected descent duration in seconds (for normalization)
+        typical_altitude: Expected starting altitude in meters (for normalization)
+        reference_mass: Reference vehicle mass in kg (for normalization)
+        
+    Returns:
+        Normalized intensity value [0, 1]
+    """
+    
+    # Base intensity from magnitude (fault-type specific)
+    base_intensity = 0.0
+    
+    if fault.fault_type == FaultType.MASS_LOSS:
+        # Mass loss impact: proportional to fraction of total mass lost
+        # Negative magnitude = mass loss
+        mass_loss_kg = abs(fault.magnitude)
+        mass_fraction = mass_loss_kg / reference_mass
+        # Clamped sigmoid: significant impact starts around 5% mass loss
+        base_intensity = min(1.0, mass_fraction * 3.0)
+        
+    elif fault.fault_type == FaultType.THRUST_VAR:
+        # Thrust variation: deviation from nominal (1.0)
+        # Lower thrust is critical, higher thrust helps but less critical
+        thrust_mult = fault.magnitude
+        if thrust_mult < 1.0:
+            # Reduced thrust: exponential severity below 0.7
+            deviation = 1.0 - thrust_mult
+            base_intensity = min(1.0, deviation * 2.5)
+        else:
+            # Increased thrust: minor concern (control issues, fuel inefficiency)
+            deviation = thrust_mult - 1.0
+            base_intensity = min(0.4, deviation * 0.3)
+            
+    elif fault.fault_type == FaultType.DRAG_CHANGE:
+        # Drag change: both increases and decreases affect performance
+        drag_mult = fault.magnitude
+        if drag_mult < 1.0:
+            # Reduced drag: harder to slow down (critical)
+            deviation = 1.0 - drag_mult
+            base_intensity = min(1.0, deviation * 2.0)
+        else:
+            # Increased drag: excessive deceleration, less critical but concerning
+            deviation = drag_mult - 1.0
+            base_intensity = min(0.6, deviation * 0.5)
+            
+    elif fault.fault_type == FaultType.WIND_GUST:
+        # Wind gust: proportional to wind speed relative to typical landing velocities
+        wind_speed = abs(fault.magnitude)
+        # Normalize against typical final landing velocity (~5 m/s)
+        base_intensity = min(1.0, wind_speed / 15.0)
+    
+    # Timing criticality factor [0.5, 2.0]
+    timing_factor = 1.0
+    
+    if fault.trigger_mode == TriggerMode.ABSOLUTE_TIME:
+        # Later in flight = more critical (less time to recover)
+        # Assume typical descent is 10s
+        time_fraction = fault.trigger_value / typical_descent_time
+        timing_factor = 0.5 + 1.5 * min(1.0, time_fraction)
+        
+    elif fault.trigger_mode == TriggerMode.TIME_SINCE_APOGEE:
+        # Similar to absolute time, later = worse
+        time_fraction = fault.trigger_value / typical_descent_time
+        timing_factor = 0.5 + 1.5 * min(1.0, time_fraction)
+        
+    elif fault.trigger_mode == TriggerMode.ALTITUDE_THRESHOLD:
+        # Lower altitude = more critical (less time/space to recover)
+        # Invert: low altitude = high criticality
+        altitude_fraction = fault.trigger_value / typical_altitude
+        timing_factor = 0.5 + 1.5 * (1.0 - min(1.0, altitude_fraction))
+        
+    elif fault.trigger_mode == TriggerMode.MANUAL:
+        # Manual trigger: assume worst case (mid-descent)
+        timing_factor = 1.5
+    
+    # Duration severity factor [0.5, 2.0]
+    duration_factor = 1.0
+    
+    if fault.duration == 0.0:
+        # Permanent fault: maximum severity
+        duration_factor = 2.0
+    else:
+        # Transient fault: severity scales with duration
+        # Short (<1s) = less severe, Long (>5s) = very severe
+        duration_factor = 0.5 + min(1.5, fault.duration / 3.0)
+    
+    # Probability factor [0, 1]
+    probability = fault.probability
+    
+    # Combined intensity with damping (square root to prevent extreme values)
+    raw_intensity = (base_intensity * timing_factor * duration_factor) ** 0.5
+    
+    # Apply probability and clamp to [0, 1]
+    final_intensity = probability * min(1.0, raw_intensity)
+    
+    return final_intensity
+
+
+def calculate_combined_fault_intensity(faults: List[FaultConfig],
+                                       typical_descent_time: float = 10.0,
+                                       typical_altitude: float = 1000.0,
+                                       reference_mass: float = 60.0) -> float:
+    """
+    Calculate combined intensity for multiple faults.
+    
+    For multiple faults, intensities combine sub-linearly (not purely additive)
+    to represent that multiple faults may have overlapping or saturating effects.
+    
+    Formula: I_combined = 1 - ∏(1 - I_i)
+    
+    This ensures:
+    - Multiple small faults accumulate realistically
+    - Result stays in [0, 1] range
+    - Order of faults doesn't matter
+    
+    Args:
+        faults: List of FaultConfig objects
+        typical_descent_time: Expected descent duration
+        typical_altitude: Expected starting altitude
+        reference_mass: Reference vehicle mass
+        
+    Returns:
+        Combined normalized intensity [0, 1]
+    """
+    if not faults:
+        return 0.0
+    
+    # Calculate individual intensities
+    intensities = [
+        calculate_fault_intensity(f, typical_descent_time, typical_altitude, reference_mass)
+        for f in faults
+    ]
+    
+    # Combine using probability multiplication (1 - product of complements)
+    combined = 1.0
+    for intensity in intensities:
+        combined *= (1.0 - intensity)
+    
+    return 1.0 - combined
+
+
 def create_default_fault_configs() -> List[FaultGroup]:
     """Create default fault configurations for testing"""
     # Example: Mass loss at 50% through descent

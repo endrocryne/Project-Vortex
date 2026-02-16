@@ -972,13 +972,54 @@ class SimulationGUI:
             self._edit_fault_dialog()
     
     def _refresh_fault_listbox(self):
-        """Refresh the fault listbox display"""
+        """Refresh the fault listbox display with intensity calculations"""
+        from faults import FaultConfig, FaultType, TriggerMode, FaultTarget, calculate_fault_intensity
+        
         self.fault_listbox.delete(0, tk.END)
+        
+        # Get reference values from current configuration for intensity calculation
+        try:
+            initial_altitude = self.initial_altitude.get()
+            # Estimate typical descent time (rough heuristic)
+            initial_velocity = abs(self.initial_velocity.get())
+            typical_descent_time = max(5.0, initial_altitude / max(10.0, initial_velocity / 2))
+            typical_altitude = initial_altitude
+            reference_mass = self.dry_mass.get() + self.propellant_mass.get()
+        except:
+            # Fallback to defaults if vars not initialized
+            typical_descent_time = 10.0
+            typical_altitude = 1000.0
+            reference_mass = 60.0
         
         for i, fault in enumerate(self.fault_list):
             # Format display string
             concurrent = f" [Group {fault['concurrent_group']}]" if fault.get('concurrent_group') else ""
-            display = f"{i+1}. {fault['fault_type']} @ {fault['trigger_mode']}={fault['trigger_value']:.1f}{concurrent}"
+            
+            # Calculate intensity
+            try:
+                fault_config = FaultConfig(
+                    fault_type=FaultType(fault['fault_type']),
+                    trigger_mode=TriggerMode(fault['trigger_mode']),
+                    trigger_value=fault['trigger_value'],
+                    magnitude=fault['magnitude'],
+                    duration=fault['duration'],
+                    target=FaultTarget(fault.get('target', 'simulated_state')),
+                    randomize_magnitude=fault.get('randomize_magnitude', False),
+                    magnitude_range=tuple(fault.get('magnitude_range', [0.8, 1.2])),
+                    probability=fault.get('probability', 1.0),
+                    fault_id=fault['fault_id']
+                )
+                intensity = calculate_fault_intensity(
+                    fault_config, 
+                    typical_descent_time, 
+                    typical_altitude, 
+                    reference_mass
+                )
+                intensity_str = f" | I={intensity:.3f}"
+            except Exception as e:
+                intensity_str = " | I=?"
+            
+            display = f"{i+1}. {fault['fault_type']} @ {fault['trigger_mode']}={fault['trigger_value']:.1f}{concurrent}{intensity_str}"
             self.fault_listbox.insert(tk.END, display)
             # Color grouped faults for visual clarity
             group_id = fault.get('concurrent_group')

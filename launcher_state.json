@@ -1,1 +1,1 @@
-{"installed": ["gui_sim", "visualizer", "control"], "installed_versions": {"gui_sim": "0.5.0", "visualizer": "0.1.9", "control": "0.18.2", "cli_sim": "0.4.5"}}
+{"installed": ["gui_sim", "visualizer", "control"], "installed_versions": {"gui_sim": "0.5.1", "visualizer": "0.1.9", "control": "0.18.2", "cli_sim": "0.4.7", "plotvisual": "0.1.2"}, "launcher_version": "1.0.2", "launcher_latest_version": "1.0.0"}
