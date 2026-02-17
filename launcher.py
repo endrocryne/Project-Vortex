@@ -10,8 +10,15 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QLabel, QPushButton, QProgressBar, 
                              QFrame, QGridLayout, QScrollArea, QMessageBox, QLineEdit, QSizePolicy)
 
+# Extension system (for displaying counts)
+try:
+    from extensions.manager import ExtensionManager
+    HAS_EXTENSIONS = True
+except ImportError:
+    HAS_EXTENSIONS = False
+
 # Launcher Configuration
-LAUNCHER_VERSION = "1.0.0"
+LAUNCHER_VERSION = "1.1.0"
 CONFIG_FILE = "launcher_state.json"
 LAUNCHER_UPDATE_FILE = "launcher_update.py"  # New launcher version will be saved here
 APPS = [
@@ -19,7 +26,7 @@ APPS = [
         "id": "gui_sim",
         "name": "HexaKinetic",
         "desc": "State of the art 6DOF rocket simulation and config interface.",
-        "version": "0.5.1",
+        "version": "0.5.2",
         "exec": [sys.executable, "gui.py"],
         "icon": "hexakinetic_icon.png"
     },
@@ -35,23 +42,31 @@ APPS = [
         "id": "visualizer",
         "name": "HexaVisual",
         "desc": "3D Flight visualization and analysis tool.",
-        "version": "0.1.9",
+        "version": "0.3.1",
         "exec": [sys.executable, "advanced_visualizer.py"],
         "icon": "hexavisual_icon.png"
     },
     {
         "id": "plotvisual",
         "name": "PlotVisual",
-        "desc": "Advanced plotting and analysis for simulation results.",
-        "version": "0.1.2",
+        "desc": "Advanced plotting and analysis for simulation results. Extensions, theming, and more.",
+        "version": "2.0.0",
         "exec": [sys.executable, "PlotVisual.py"],
         "icon": "hexavisual_icon.png"
+    },
+    {
+        "id": "extension_manager",
+        "name": "Vortex Extension Manager",
+        "desc": "Manage and discover extensions across all Vortex desktop apps.",
+        "version": "1.0.0",
+        "exec": [sys.executable, "vortex_extension_manager.py"],
+        "icon": "vortex_icon.png"
     },
     {
         "id": "control",
         "name": "Vortex Mission Control",
         "desc": "Direct hardware link and mission management.",
-        "version": "0.19.0",
+        "version": "0.19.1",
         "exec": [sys.executable, "vortex-control.py"],
         "icon": "missioncontrol_icon.png"
     }
@@ -102,6 +117,13 @@ class AppCard(QFrame):
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
 
+        # Optional badge (e.g. Legacy, Beta)
+        self.badge_label = QLabel()
+        self.badge_label.setAlignment(Qt.AlignCenter)
+        self.badge_label.setStyleSheet("background-color: #ffcc00; color: #222; border-radius: 8px; padding: 2px 6px; font-size: 10px;")
+        self.badge_label.hide()
+        layout.addWidget(self.badge_label) 
+
         # Description
         desc = QLabel(app_info["desc"])
         desc.setWordWrap(True)
@@ -137,6 +159,14 @@ class AppCard(QFrame):
         self.update_ui()
 
     def update_ui(self):
+        # Badge (optional)
+        badge_text = self.app_info.get('badge')
+        if badge_text:
+            self.badge_label.setText(badge_text.upper())
+            self.badge_label.show()
+        else:
+            self.badge_label.hide()
+
         versions = self.launcher.state.get("installed_versions", {})
         installed_version = versions.get(self.app_info["id"])
         target_version = self.app_info["version"]
@@ -361,16 +391,36 @@ class VortexLauncher(QMainWindow):
         more_layout = QVBoxLayout(self.more_container)
         more_layout.setSpacing(8)
 
+        self.more_app_cards = []
+
         retro_app = {
             "id": "retro_visualizer",
             "name": "Retro Visualizer",
             "desc": "The legacy 3D visualization software. For the most features, use HexaVisual.",
             "version": "0.1.0",
             "exec": [sys.executable, "visualization.py"],
-            "icon": "hexavisual_icon.png"
+            "icon": "hexavisual_icon.png",
+            "badge": "Legacy"
         }
         retro_card = AppCard(retro_app, self)
-        more_layout.addWidget(retro_card)
+        self.more_app_cards.append((retro_app, retro_card))
+        more_layout.addWidget(retro_card) 
+
+        plotvisual_legacy_app = {
+            "id": "plotvisual_legacy",
+            "name": "PlotVisual (Legacy)",
+            "desc": "Original visualization tool. Use the new PlotVisual for extensions and theming.",
+            "version": "1.0.0",
+            "exec": [sys.executable, "PlotVisual_legacy.py"],
+            "icon": "hexavisual_icon.png",
+            "badge": "Legacy"
+        }
+        legacy_pv_card = AppCard(plotvisual_legacy_app, self)
+        self.more_app_cards.append((plotvisual_legacy_app, legacy_pv_card))
+        more_layout.addWidget(legacy_pv_card)
+
+
+
         main_layout.addWidget(self.more_container)
 
         # Footer with version info and update check
@@ -400,6 +450,20 @@ class VortexLauncher(QMainWindow):
         
         version_label = QLabel(f"Vortex Desktop Launcher v{LAUNCHER_VERSION}")
         footer_layout.addWidget(version_label)
+
+        # Extension count
+        ext_count_text = ""
+        if HAS_EXTENSIONS:
+            try:
+                _mgr = ExtensionManager()
+                _ext_list = _mgr.list_installed()
+                ext_count_text = f"  |  \U0001F9E9 {len(_ext_list)} extension(s)"
+            except Exception:
+                ext_count_text = ""
+        ext_label = QLabel(ext_count_text)
+        ext_label.setStyleSheet("color: #007acc; font-size: 10px;")
+        footer_layout.addWidget(ext_label)
+
         footer_layout.addStretch()
         
         check_update_btn = QPushButton("Check for Updates")
@@ -608,6 +672,20 @@ start "" "{sys.executable}" "launcher.py"
         for app, card in getattr(self, 'app_cards', []):
             visible = (t == '') or (t in app.get('name', '').lower()) or (t in app.get('desc', '').lower()) or (t in app.get('id', '').lower())
             card.setVisible(visible)
+
+        more_has_match = False
+        for app, card in getattr(self, 'more_app_cards', []):
+            visible = (t == '') or (t in app.get('name', '').lower()) or (t in app.get('desc', '').lower()) or (t in app.get('id', '').lower())
+            card.setVisible(visible)
+            more_has_match = more_has_match or visible
+
+        if t:
+            self.more_container.setVisible(more_has_match)
+            self.show_more_btn.setChecked(more_has_match)
+            self.show_more_btn.setText("Hide more apps ▴" if more_has_match else "Show more apps ▾")
+        else:
+            self.more_container.setVisible(self.show_more_btn.isChecked())
+
         # Reflow after changing visibility
         try:
             self.layout_app_cards()

@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(dir \"C:\\\\Users\\\\rishi\\\\Documents\\\\Vortex\\\\Project-Vortex\" /s /b)"
+      "Bash(dir \"C:\\\\Users\\\\rishi\\\\Documents\\\\Vortex\\\\Project-Vortex\" /s /b)",
+      "Bash(python3:*)"
     ]
   }
 }

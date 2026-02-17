@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "general": {
+    "remember_last_source": true,
+    "last_file": "",
+    "last_folder": "",
+    "recent_sources": []
+  },
+  "plot": {
+    "default_view": "velocity",
+    "yscale_velocity": "Linear",
+    "marker_size": 49,
+    "point_alpha": 0.6,
+    "hist_bins": 30,
+    "export_dpi": 300,
+    "show_grid": true
+  },
+  "appearance": {
+    "theme": "Light",
+    "accent_color": "#007acc",
+    "font_scale": 12
+  },
+  "extensions": {
+    "auto_enable": true,
+    "ext_directory": "extensions/installed"
+  }
+}

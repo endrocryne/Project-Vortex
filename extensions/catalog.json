@@ -1,0 +1,75 @@
+{
+  "catalog_version": 1,
+  "last_updated": "2026-02-17",
+  "extensions": [
+    {
+      "id": "claude_graphs",
+      "name": "Claude Graphs — ISEF Suite",
+      "version": "1.0.0",
+      "extension_type": "plotvisual",
+      "author": "Claude Opus 4.6",
+      "description": "ISEF-focused visualization suite with cliff plots, sim-vs-flight validation, ML comparison, sensitivity analysis, trajectory profiles, landing dispersion, EKF performance, and feature importance charts.",
+      "icon": "📊",
+      "tags": ["isef", "graphs", "analysis", "visualization", "ml", "ekf"],
+      "category": "Analysis",
+      "bundled": true,
+      "featured": true
+    },
+    {
+      "id": "advanced_fault_models",
+      "name": "Advanced Fault Models",
+      "version": "1.0.0",
+      "extension_type": "hexakinetic",
+      "author": "HexaKinetic Systems",
+      "description": "Extended fault injection models including sensor drift, actuator saturation, communication delay, and cascading failure scenarios for realistic simulation testing.",
+      "icon": "⚡",
+      "tags": ["faults", "simulation", "testing", "reliability"],
+      "category": "Simulation",
+      "download_url": null,
+      "bundled": false,
+      "featured": false
+    },
+    {
+      "id": "wind_models_pack",
+      "name": "Wind Models Pack",
+      "version": "1.0.0",
+      "extension_type": "hexakinetic",
+      "author": "HexaKinetic Systems",
+      "description": "Collection of advanced atmospheric wind models: Dryden turbulence, von Kármán spectrum, microburst profiles, and wind shear layers for high-fidelity simulation.",
+      "icon": "🌬️",
+      "tags": ["wind", "atmosphere", "simulation", "turbulence"],
+      "category": "Simulation",
+      "download_url": null,
+      "bundled": false,
+      "featured": false
+    },
+    {
+      "id": "trajectory_overlays",
+      "name": "3D Trajectory Overlays",
+      "version": "1.0.0",
+      "extension_type": "hexavisual",
+      "author": "HexaKinetic Systems",
+      "description": "Additional 3D visualization overlays for HexaVisual: velocity cones, acceleration vectors, predicted trajectory arcs, ground impact zones, and wind field visualization.",
+      "icon": "🎯",
+      "tags": ["3d", "visualization", "overlays", "trajectory"],
+      "category": "Visualization",
+      "download_url": null,
+      "bundled": false,
+      "featured": false
+    },
+    {
+      "id": "telemetry_dashboard",
+      "name": "Telemetry Dashboard Widgets",
+      "version": "1.0.0",
+      "extension_type": "mission_control",
+      "author": "HexaKinetic Systems",
+      "description": "Custom dashboard widgets for Vortex Mission Control: real-time altitude gauge, velocity tape, attitude indicator, and G-force meter.",
+      "icon": "📡",
+      "tags": ["dashboard", "telemetry", "widgets", "mission-control"],
+      "category": "Mission Control",
+      "download_url": null,
+      "bundled": false,
+      "featured": false
+    }
+  ]
+}

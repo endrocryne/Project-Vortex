@@ -21,6 +21,15 @@ import threading
 
 from simulation import SuicideBurnSimulation
 
+# Extension system
+try:
+    from extensions.manager import ExtensionManager
+    from extensions.registry import ExtensionRegistry
+    from extensions.catalog import ExtensionCatalog
+    HAS_EXTENSIONS = True
+except ImportError:
+    HAS_EXTENSIONS = False
+
 
 class SimulationGUI:
     """GUI for configuring and running simulations"""
@@ -69,6 +78,8 @@ class SimulationGUI:
         self.create_run_tab()
         # Plots tab for embedded interactive figures
         self.create_plots_tab()
+        # Extensions tab
+        self.create_extensions_tab()
         
         # Status bar
         self.status_bar = tk.Label(root, text="Ready", bd=1, relief=tk.SUNKEN, anchor=tk.W)
@@ -80,6 +91,11 @@ class SimulationGUI:
         self.banner_dismissed_manually = False
         self.last_feasibility_state = True # True = Possible
         self.last_result_csv = None # Track the latest result CSV for HexaVisual
+        
+        # Extension system
+        self.ext_manager = None
+        self.ext_registry = None
+        self._init_extensions()
         
         # Setup continuous monitoring
         self.setup_monitoring()
@@ -114,6 +130,14 @@ class SimulationGUI:
         view_menu.add_command(label="Zoom In", command=lambda: self.log("Zoom In (Placeholder)"))
         view_menu.add_command(label="Zoom Out", command=lambda: self.log("Zoom Out (Placeholder)"))
         view_menu.add_command(label="Fit to Screen", command=lambda: self.log("Fit to Screen (Placeholder)"))
+
+        # Extensions Menu
+        ext_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Extensions", menu=ext_menu)
+        ext_menu.add_command(label="Manage Extensions", command=self._show_extensions_tab)
+        ext_menu.add_separator()
+        ext_menu.add_command(label="Refresh Extensions", command=self._refresh_extensions)
+        ext_menu.add_command(label="Install from File...", command=self._install_ext_from_file)
 
     def open_preferences(self):
         """Open Preferences window"""
@@ -1206,6 +1230,217 @@ class SimulationGUI:
         for child in list(self.plots_frame.winfo_children()):
             child.destroy()        
         # (Run tab widgets moved to create_run_tab)
+
+    # ==================================================================
+    # Extensions Tab & System
+    # ==================================================================
+
+    def create_extensions_tab(self):
+        """Create the Extensions management tab."""
+        tab = ttk.Frame(self.notebook)
+        self.notebook.add(tab, text="Extensions")
+        self.extensions_tab = tab
+
+        # Header
+        header_frame = ttk.Frame(tab)
+        header_frame.pack(fill='x', padx=10, pady=(10, 5))
+        ttk.Label(header_frame, text="Extension Manager", font=('Segoe UI', 14, 'bold')).pack(side='left')
+        ttk.Button(header_frame, text="Refresh", command=self._refresh_extensions).pack(side='right', padx=5)
+        ttk.Button(header_frame, text="Install from File", command=self._install_ext_from_file).pack(side='right', padx=5)
+
+        # Info label
+        self._ext_info_label = ttk.Label(tab, text="Loading extensions...", foreground='gray')
+        self._ext_info_label.pack(fill='x', padx=10, pady=(0, 5))
+
+        # Extension list area with scrollbar
+        list_frame = ttk.Frame(tab)
+        list_frame.pack(fill='both', expand=True, padx=10, pady=5)
+
+        scrollbar = ttk.Scrollbar(list_frame)
+        scrollbar.pack(side='right', fill='y')
+
+        self._ext_listbox = tk.Listbox(list_frame, yscrollcommand=scrollbar.set, 
+                                        height=12, font=('Segoe UI', 10),
+                                        selectmode=tk.SINGLE)
+        self._ext_listbox.pack(fill='both', expand=True, side='left')
+        scrollbar.config(command=self._ext_listbox.yview)
+        self._ext_listbox.bind('<<ListboxSelect>>', self._on_ext_select)
+
+        # Detail panel
+        detail_frame = ttk.LabelFrame(tab, text="Extension Details", padding=10)
+        detail_frame.pack(fill='x', padx=10, pady=5)
+
+        self._ext_detail_name = ttk.Label(detail_frame, text="Select an extension above", font=('Segoe UI', 11, 'bold'))
+        self._ext_detail_name.pack(anchor='w')
+        self._ext_detail_info = ttk.Label(detail_frame, text="", wraplength=600, foreground='gray')
+        self._ext_detail_info.pack(anchor='w', pady=(2, 5))
+
+        btn_frame = ttk.Frame(detail_frame)
+        btn_frame.pack(anchor='w')
+        self._ext_enable_btn = ttk.Button(btn_frame, text="Enable", command=self._toggle_ext_enabled)
+        self._ext_enable_btn.pack(side='left', padx=(0, 5))
+        self._ext_uninstall_btn = ttk.Button(btn_frame, text="Uninstall", command=self._uninstall_ext)
+        self._ext_uninstall_btn.pack(side='left')
+
+        # Catalog section
+        catalog_frame = ttk.LabelFrame(tab, text="Available in Catalog", padding=10)
+        catalog_frame.pack(fill='x', padx=10, pady=(5, 10))
+
+        self._catalog_listbox = tk.Listbox(catalog_frame, height=4, font=('Segoe UI', 10))
+        self._catalog_listbox.pack(fill='x')
+
+        # Store manifest list for lookup
+        self._ext_manifests = []
+        self._catalog_entries = []
+
+    def _init_extensions(self):
+        """Initialize the extension system."""
+        if not HAS_EXTENSIONS:
+            self._ext_info_label.config(text="Extension system not available (import error)")
+            return
+
+        try:
+            self.ext_manager = ExtensionManager()
+            self.ext_registry = ExtensionRegistry('hexakinetic', self.ext_manager)
+            self.ext_catalog = ExtensionCatalog()
+            self.ext_registry.discover()
+            self.ext_registry.activate_all(self)
+            self._refresh_extensions_ui()
+        except Exception as e:
+            self._ext_info_label.config(text=f"Extension error: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _refresh_extensions(self):
+        """Re-discover and refresh extensions."""
+        if not self.ext_manager:
+            return
+        try:
+            self.ext_registry.deactivate_all()
+            self.ext_manager._manifests = {}
+            self.ext_manager._instances = {}
+            self.ext_registry.discover()
+            self.ext_registry.activate_all(self)
+            self._refresh_extensions_ui()
+            self.status_bar.config(text="Extensions refreshed")
+        except Exception as e:
+            messagebox.showerror("Extension Error", str(e))
+
+    def _refresh_extensions_ui(self):
+        """Update the extensions list UI."""
+        self._ext_listbox.delete(0, tk.END)
+        self._ext_manifests = []
+
+        if not self.ext_manager:
+            return
+
+        manifests = self.ext_manager.list_installed()
+        for m in manifests:
+            is_enabled = self.ext_manager.is_enabled(m.id)
+            status = "\u2705" if is_enabled else "\u274C"
+            bundled = " [bundled]" if m.bundled else ""
+            self._ext_listbox.insert(tk.END, f"{status}  {m.name} v{m.version}{bundled}")
+            self._ext_manifests.append(m)
+
+        count = len(manifests)
+        active = sum(1 for m in manifests if self.ext_manager.is_enabled(m.id))
+        self._ext_info_label.config(text=f"{count} extension(s) installed, {active} active")
+
+        # Catalog
+        self._catalog_listbox.delete(0, tk.END)
+        self._catalog_entries = []
+        if hasattr(self, 'ext_catalog'):
+            installed_ids = {m.id for m in manifests}
+            for entry in self.ext_catalog.get_all():
+                if entry.id not in installed_ids and not entry.bundled:
+                    self._catalog_listbox.insert(tk.END, f"\U0001F4E6  {entry.name} v{entry.version} ({entry.extension_type})")
+                    self._catalog_entries.append(entry)
+
+    def _on_ext_select(self, event):
+        """Handle extension list selection."""
+        sel = self._ext_listbox.curselection()
+        if not sel or not self._ext_manifests:
+            return
+        idx = sel[0]
+        if idx >= len(self._ext_manifests):
+            return
+        m = self._ext_manifests[idx]
+        is_enabled = self.ext_manager.is_enabled(m.id) if self.ext_manager else False
+
+        self._ext_detail_name.config(text=f"{m.name} v{m.version}")
+        desc = m.description or "No description"
+        author = f"by {m.author}" if m.author else ""
+        ext_type = f"Type: {m.extension_type}"
+        bundled = "Bundled: Yes" if m.bundled else "Bundled: No"
+        self._ext_detail_info.config(text=f"{desc}\n{author}\n{ext_type}  |  {bundled}")
+        self._ext_enable_btn.config(text="Disable" if is_enabled else "Enable")
+        self._ext_uninstall_btn.config(state='disabled' if m.bundled else 'normal')
+
+    def _toggle_ext_enabled(self):
+        """Toggle enable/disable for selected extension."""
+        sel = self._ext_listbox.curselection()
+        if not sel or not self.ext_manager:
+            return
+        idx = sel[0]
+        if idx >= len(self._ext_manifests):
+            return
+        m = self._ext_manifests[idx]
+        if self.ext_manager.is_enabled(m.id):
+            self.ext_manager.disable(m.id)
+        else:
+            self.ext_manager.enable(m.id)
+        self._refresh_extensions_ui()
+
+    def _uninstall_ext(self):
+        """Uninstall the selected extension."""
+        sel = self._ext_listbox.curselection()
+        if not sel or not self.ext_manager:
+            return
+        idx = sel[0]
+        if idx >= len(self._ext_manifests):
+            return
+        m = self._ext_manifests[idx]
+        if m.bundled:
+            messagebox.showinfo("Bundled", "Cannot uninstall bundled extensions.")
+            return
+        if messagebox.askyesno("Confirm", f"Uninstall {m.name}?"):
+            if self.ext_manager.uninstall(m.id):
+                self._refresh_extensions_ui()
+                self.status_bar.config(text=f"Uninstalled {m.name}")
+            else:
+                messagebox.showerror("Error", "Uninstall failed.")
+
+    def _install_ext_from_file(self):
+        """Install extension from .vortexext file or directory."""
+        if not self.ext_manager:
+            messagebox.showerror("Error", "Extension system not available.")
+            return
+
+        filepath = filedialog.askopenfilename(
+            title="Install Extension",
+            filetypes=[("Vortex Extension", "*.vortexext"), ("ZIP files", "*.zip"), ("All files", "*.*")]
+        )
+        if not filepath:
+            return
+        try:
+            manifest = self.ext_manager.install_from_vortexext(filepath)
+            self._refresh_extensions_ui()
+            messagebox.showinfo("Installed", f"Installed {manifest.name} v{manifest.version}\nRestart for full effect.")
+        except Exception as e:
+            messagebox.showerror("Install Error", str(e))
+
+    def _show_extensions_tab(self):
+        """Switch to the Extensions tab."""
+        # Find the index of the Extensions tab
+        for i in range(self.notebook.index('end')):
+            if self.notebook.tab(i, 'text') == 'Extensions':
+                self.notebook.select(i)
+                return
+        
+    # ==================================================================
+    # End Extensions
+    # ==================================================================
+
         
     def parse_thrust_curve(self):
         """Parse thrust curve from text widget"""

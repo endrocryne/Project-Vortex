@@ -4,8 +4,10 @@ import json
 import serial
 import serial.tools.list_ports
 from PyQt5.QtCore import QUrl, Qt, pyqtSlot, pyqtSignal, QObject
-from PyQt5.QtGui import QIcon
-from PyQt5.QtWidgets import QApplication, QMainWindow, QAction, QMessageBox, QVBoxLayout, QWidget, QInputDialog
+from PyQt5.QtGui import QIcon, QFont
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QAction, QMessageBox, QVBoxLayout,
+                             QWidget, QInputDialog, QFileDialog, QDialog, QLabel, QHBoxLayout,
+                             QFrame, QPushButton, QScrollArea)
 from PyQt5.QtWebChannel import QWebChannel
 import ctypes
 
@@ -14,6 +16,14 @@ try:
 except ImportError:
     print("Error: PyQtWebEngine not found. Please install it using: pip install PyQtWebEngine")
     sys.exit(1)
+
+# Extension system
+try:
+    from extensions.manager import ExtensionManager
+    from extensions.registry import ExtensionRegistry
+    HAS_EXTENSIONS = True
+except ImportError:
+    HAS_EXTENSIONS = False
 
 class SerialBridge(QObject):
     """
@@ -199,6 +209,11 @@ class VortexControlWindow(QMainWindow):
         # Attach bridge backreference so settings actions can instruct the window
         self.bridge.main_window = self
 
+        # Extension system
+        self.ext_manager = None
+        self.ext_registry = None
+        self._init_extensions()
+
         # Inject banner script after page loads to show persistent banner when appropriate
         self.browser.loadFinished.connect(self.inject_banner_script)
 
@@ -354,6 +369,13 @@ class VortexControlWindow(QMainWindow):
         view_menu.addAction("Zoom Out", lambda: self.browser.setZoomFactor(max(0.1, self.browser.zoomFactor() - 0.1)))
         view_menu.addAction("Reset Zoom", lambda: self.browser.setZoomFactor(1.0))
 
+        # Extensions menu
+        ext_menu = menubar.addMenu('Extensions')
+        ext_menu.addAction('Manage Extensions...', self._show_extensions_dialog)
+        ext_menu.addSeparator()
+        ext_menu.addAction('Install from File...', self._install_ext_from_file)
+        ext_menu.addAction('Refresh Extensions', self._init_extensions)
+
     def show_about(self):
         QMessageBox.about(self, "About Vortex Control", 
                         "Vortex Control\n\n"
@@ -361,6 +383,127 @@ class VortexControlWindow(QMainWindow):
                         "This tool lets you connect to and control any rocket equipped with VortexLink.\n"
                         "Powered by Mishra JSD, a lightweight and fast Electron alternative, running on PyQtWebEngine\n"
                         "© 2026 Agastya Mishra")
+
+    # ------------------------------------------------------------------
+    # Extension System
+    # ------------------------------------------------------------------
+    def _init_extensions(self):
+        """Initialize Mission Control extensions."""
+        if not HAS_EXTENSIONS:
+            return
+        try:
+            self.ext_manager = ExtensionManager()
+            self.ext_registry = ExtensionRegistry('mission_control', self.ext_manager)
+            self.ext_registry.discover()
+            self.ext_registry.activate_all(self)
+            ext_count = len(self.ext_manager.list_installed())
+            print(f"[MissionControl] {ext_count} extension(s) loaded")
+        except Exception as e:
+            print(f"[MissionControl] Extension init error: {e}")
+
+    def _show_extensions_dialog(self):
+        """Show extension management dialog."""
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Mission Control Extensions")
+        dlg.resize(500, 400)
+        layout = QVBoxLayout(dlg)
+
+        header = QLabel("Extensions")
+        header.setFont(QFont("Segoe UI", 14, QFont.Bold))
+        layout.addWidget(header)
+
+        if not self.ext_manager:
+            layout.addWidget(QLabel("Extension system not available."))
+            dlg.exec_()
+            return
+
+        manifests = self.ext_manager.list_installed()
+        if not manifests:
+            layout.addWidget(QLabel("No extensions installed."))
+        else:
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll_content = QWidget()
+            scroll_layout = QVBoxLayout(scroll_content)
+            scroll_layout.setSpacing(8)
+
+            for m in manifests:
+                is_enabled = self.ext_manager.is_enabled(m.id)
+                card = QFrame()
+                card.setFrameStyle(QFrame.StyledPanel)
+                card.setStyleSheet("QFrame { background-color: #2a2a2e; border-radius: 8px; padding: 10px; }")
+                card_layout = QHBoxLayout(card)
+
+                info = QVBoxLayout()
+                name_label = QLabel(f"{m.name} v{m.version}")
+                name_label.setFont(QFont("Segoe UI", 11, QFont.Bold))
+                info.addWidget(name_label)
+                desc = QLabel(m.description or "No description")
+                desc.setStyleSheet("color: #888888;")
+                desc.setWordWrap(True)
+                info.addWidget(desc)
+                type_label = QLabel(f"Type: {m.extension_type}  |  {'Bundled' if m.bundled else 'Installed'}")
+                type_label.setStyleSheet("color: #666666; font-size: 10px;")
+                info.addWidget(type_label)
+                card_layout.addLayout(info, stretch=1)
+
+                status = QLabel("\u2705 Enabled" if is_enabled else "\u274C Disabled")
+                status.setStyleSheet(f"color: {'#4caf50' if is_enabled else '#ff5555'}; font-weight: bold;")
+                card_layout.addWidget(status)
+
+                toggle_btn = QPushButton("Disable" if is_enabled else "Enable")
+                toggle_btn.setFixedWidth(80)
+
+                def _make_toggle(ext_id=m.id, btn=toggle_btn, stat=status):
+                    def _toggle():
+                        if self.ext_manager.is_enabled(ext_id):
+                            self.ext_manager.disable(ext_id)
+                            btn.setText("Enable")
+                            stat.setText("\u274C Disabled")
+                            stat.setStyleSheet("color: #ff5555; font-weight: bold;")
+                        else:
+                            self.ext_manager.enable(ext_id)
+                            btn.setText("Disable")
+                            stat.setText("\u2705 Enabled")
+                            stat.setStyleSheet("color: #4caf50; font-weight: bold;")
+                    return _toggle
+
+                toggle_btn.clicked.connect(_make_toggle())
+                card_layout.addWidget(toggle_btn)
+
+                scroll_layout.addWidget(card)
+
+            scroll_layout.addStretch()
+            scroll.setWidget(scroll_content)
+            layout.addWidget(scroll)
+
+        install_btn = QPushButton("Install from .vortexext file...")
+        install_btn.clicked.connect(lambda: self._install_ext_from_file())
+        layout.addWidget(install_btn)
+
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(dlg.close)
+        layout.addWidget(close_btn)
+
+        dlg.exec_()
+
+    def _install_ext_from_file(self):
+        """Install an extension from .vortexext file."""
+        if not self.ext_manager:
+            QMessageBox.warning(self, "Error", "Extension system not available.")
+            return
+        filepath, _ = QFileDialog.getOpenFileName(
+            self, "Install Extension", "",
+            "Vortex Extensions (*.vortexext);;ZIP files (*.zip);;All files (*.*)"
+        )
+        if not filepath:
+            return
+        try:
+            manifest = self.ext_manager.install_from_vortexext(filepath)
+            QMessageBox.information(self, "Installed",
+                                    f"Installed {manifest.name} v{manifest.version}\nRestart for full effect.")
+        except Exception as e:
+            QMessageBox.critical(self, "Install Error", str(e))
 
     def inject_banner_script(self, ok):
         # Run a small script in the page context to ensure banner is visible when needed.

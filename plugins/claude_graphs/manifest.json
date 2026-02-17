@@ -1,0 +1,14 @@
+{
+  "id": "claude_graphs",
+  "name": "Claude Graphs — ISEF Suite",
+  "version": "1.0.0",
+  "extension_type": "plotvisual",
+  "entry_point": "plugin",
+  "author": "HexaKinetic Systems",
+  "description": "ISEF-focused visualization suite with cliff plots, sim-vs-flight validation, ML comparison, sensitivity analysis, trajectory profiles, landing dispersion, EKF performance, and feature importance charts.",
+  "min_vortex_version": "0.5.0",
+  "icon": "📊",
+  "tags": ["isef", "graphs", "analysis", "visualization", "ml", "ekf"],
+  "dependencies": [],
+  "license": "Proprietary"
+}

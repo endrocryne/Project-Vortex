@@ -50,6 +50,15 @@ try:
 except ImportError:
     HAS_URLLIB = False
 
+# Extension system
+try:
+    from extensions.manager import ExtensionManager
+    from extensions.registry import ExtensionRegistry
+    from extensions.catalog import ExtensionCatalog
+    HAS_EXTENSIONS = True
+except ImportError:
+    HAS_EXTENSIONS = False
+
 
 # ---------------------------------------------------------------------------
 # Particle system for exhaust plume
@@ -309,6 +318,140 @@ class RocketVisualizer(QMainWindow):
 
         # Setup improved lighting
         self._setup_lighting()
+
+        # Extension system
+        self.ext_manager = None
+        self.ext_registry = None
+        self._init_extensions()
+
+    # ------------------------------------------------------------------
+    # Extension System
+    # ------------------------------------------------------------------
+    def _init_extensions(self):
+        """Initialize HexaVisual extensions."""
+        if not HAS_EXTENSIONS:
+            return
+        try:
+            self.ext_manager = ExtensionManager()
+            self.ext_registry = ExtensionRegistry('hexavisual', self.ext_manager)
+            self.ext_registry.discover()
+            self.ext_registry.activate_all(self)
+            ext_count = len(self.ext_manager.list_installed())
+            print(f"[HexaVisual] {ext_count} extension(s) loaded")
+        except Exception as e:
+            print(f"[HexaVisual] Extension init error: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _show_extensions_dialog(self):
+        """Show a dialog listing installed extensions."""
+        dlg = QDialog(self)
+        dlg.setWindowTitle("HexaVisual Extensions")
+        dlg.resize(500, 400)
+        layout = QVBoxLayout(dlg)
+
+        header = QLabel("Extensions")
+        header.setFont(QFont("Segoe UI", 14, QFont.Bold))
+        layout.addWidget(header)
+
+        if not self.ext_manager:
+            layout.addWidget(QLabel("Extension system not available."))
+            dlg.exec_()
+            return
+
+        manifests = self.ext_manager.list_installed()
+        if not manifests:
+            layout.addWidget(QLabel("No extensions installed."))
+        else:
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll_content = QWidget()
+            scroll_layout = QVBoxLayout(scroll_content)
+            scroll_layout.setSpacing(8)
+
+            for m in manifests:
+                is_enabled = self.ext_manager.is_enabled(m.id)
+                card = QFrame()
+                card.setFrameStyle(QFrame.StyledPanel)
+                card.setStyleSheet("QFrame { background-color: #2a2a2e; border-radius: 8px; padding: 10px; }")
+                card_layout = QHBoxLayout(card)
+
+                info = QVBoxLayout()
+                name_label = QLabel(f"{m.name} v{m.version}")
+                name_label.setFont(QFont("Segoe UI", 11, QFont.Bold))
+                info.addWidget(name_label)
+
+                desc = QLabel(m.description or "No description")
+                desc.setStyleSheet("color: #888888;")
+                desc.setWordWrap(True)
+                info.addWidget(desc)
+
+                type_label = QLabel(f"Type: {m.extension_type}  |  {'Bundled' if m.bundled else 'Installed'}")
+                type_label.setStyleSheet("color: #666666; font-size: 10px;")
+                info.addWidget(type_label)
+
+                card_layout.addLayout(info, stretch=1)
+
+                status = QLabel("\u2705 Enabled" if is_enabled else "\u274C Disabled")
+                status.setStyleSheet(f"color: {'#4caf50' if is_enabled else '#ff5555'}; font-weight: bold;")
+                card_layout.addWidget(status)
+
+                toggle_btn = QPushButton("Disable" if is_enabled else "Enable")
+                toggle_btn.setFixedWidth(80)
+
+                def _make_toggle(ext_id=m.id, btn=toggle_btn, stat=status):
+                    def _toggle():
+                        if self.ext_manager.is_enabled(ext_id):
+                            self.ext_manager.disable(ext_id)
+                            btn.setText("Enable")
+                            stat.setText("\u274C Disabled")
+                            stat.setStyleSheet("color: #ff5555; font-weight: bold;")
+                        else:
+                            self.ext_manager.enable(ext_id)
+                            btn.setText("Disable")
+                            stat.setText("\u2705 Enabled")
+                            stat.setStyleSheet("color: #4caf50; font-weight: bold;")
+                    return _toggle
+
+                toggle_btn.clicked.connect(_make_toggle())
+                card_layout.addWidget(toggle_btn)
+
+                scroll_layout.addWidget(card)
+
+            scroll_layout.addStretch()
+            scroll.setWidget(scroll_content)
+            layout.addWidget(scroll)
+
+        # Install button
+        install_btn = QPushButton("Install from .vortexext file...")
+        install_btn.clicked.connect(lambda: self._install_ext_dialog(dlg))
+        layout.addWidget(install_btn)
+
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(dlg.close)
+        layout.addWidget(close_btn)
+
+        dlg.exec_()
+
+    def _install_ext_dialog(self, parent_dlg=None):
+        """Install an extension from file."""
+        if not self.ext_manager:
+            return
+        filepath, _ = QFileDialog.getOpenFileName(
+            self, "Install Extension", "",
+            "Vortex Extensions (*.vortexext);;ZIP files (*.zip);;All files (*.*)"
+        )
+        if not filepath:
+            return
+        try:
+            manifest = self.ext_manager.install_from_vortexext(filepath)
+            QMessageBox.information(self, "Installed",
+                                    f"Installed {manifest.name} v{manifest.version}\nRestart for full effect.")
+            if parent_dlg:
+                parent_dlg.close()
+                self._show_extensions_dialog()
+        except Exception as e:
+            QMessageBox.critical(self, "Install Error", str(e))
 
     # ------------------------------------------------------------------
     # Preferences I/O
@@ -775,6 +918,22 @@ class RocketVisualizer(QMainWindow):
         toggle_trail_action = QAction("Toggle Trajectory Trail", self)
         toggle_trail_action.triggered.connect(lambda: self.chk_trail.setChecked(not self.chk_trail.isChecked()))
         view_menu.addAction(toggle_trail_action)
+
+        # Extensions
+        ext_menu = menubar.addMenu("Extensions")
+        manage_ext_action = QAction("Manage Extensions...", self)
+        manage_ext_action.triggered.connect(self._show_extensions_dialog)
+        ext_menu.addAction(manage_ext_action)
+
+        ext_menu.addSeparator()
+
+        install_ext_action = QAction("Install from File...", self)
+        install_ext_action.triggered.connect(self._install_ext_dialog)
+        ext_menu.addAction(install_ext_action)
+
+        refresh_ext_action = QAction("Refresh Extensions", self)
+        refresh_ext_action.triggered.connect(self._init_extensions)
+        ext_menu.addAction(refresh_ext_action)
 
     # ------------------------------------------------------------------
     # Dialogs

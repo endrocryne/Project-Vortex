@@ -1,0 +1,8 @@
+{
+  "claude_graphs": {
+    "enabled": true,
+    "installed_at": "bundled",
+    "version": "1.0.0",
+    "settings": {}
+  }
+}

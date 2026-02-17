@@ -1,1 +1,1 @@
-{"installed": ["gui_sim", "visualizer", "control"], "installed_versions": {"gui_sim": "0.5.1", "visualizer": "0.1.9", "control": "0.18.2", "cli_sim": "0.4.7", "plotvisual": "0.1.2"}, "launcher_version": "1.0.2", "launcher_latest_version": "1.0.0"}
+{"installed": ["gui_sim", "visualizer", "control"], "installed_versions": {"gui_sim": "0.5.2", "visualizer": "0.3.1", "control": "0.18.2", "cli_sim": "0.4.7", "plotvisual": "2.0.0", "plotvisual_legacy": "0.1.2-legacy", "extension_manager": "1.0.0"}, "launcher_version": "1.0.2", "launcher_latest_version": "1.0.0"}

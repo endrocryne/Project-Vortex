@@ -823,6 +823,7 @@ class ClaudeGraphsPlugin(PlotVisualPlugin):
             base_landing_vel = max(0.1, base_landing_vel)
 
             base_drift = wind * 1.5 + abs(thrust_var - 1.0) * 20 + np.random.normal(0, 3)
+            base_drift = max(0.1, abs(base_drift))  # Ensure positive
             base_x = np.random.normal(0, base_drift)
             base_y = np.random.normal(0, base_drift)
 
@@ -850,6 +851,7 @@ class ClaudeGraphsPlugin(PlotVisualPlugin):
                 ml_landing_vel = base_landing_vel * 0.6  # still better but not great
 
             ml_drift = wind * 0.3 + abs(thrust_var - 1.0) * 4 + np.random.normal(0, 1)
+            ml_drift = max(0.1, abs(ml_drift))  # Ensure positive
             ml_x = np.random.normal(0, ml_drift)
             ml_y = np.random.normal(0, ml_drift)
 
