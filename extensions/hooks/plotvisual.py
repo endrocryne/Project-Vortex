@@ -128,3 +128,26 @@ class PlotVisualExtension(VortexExtension):
             True if exported successfully
         """
         return False
+
+    # --- Sidebar panel hook ---
+
+    def inject_sidebar_panel(self, parent_layout: Any, data_store: Any,
+                              embed_fn: Any, status_fn: Any,
+                              results_dir: str) -> None:
+        """
+        Optional: inject a custom QWidget block into the Graphs sidebar.
+
+        Called by PlotVisual after the built-in graph buttons are added.
+        The extension adds whatever Qt widgets it needs directly to
+        *parent_layout* (a QVBoxLayout).  This lets extensions ship their
+        own compact panels (e.g. data-loader groups, quick-action buttons)
+        that live in the sidebar without requiring changes to PlotVisual.
+
+        Args:
+            parent_layout: The QVBoxLayout of the Graphs left panel.
+            data_store:    The VortexDataStore (read/write).
+            embed_fn:      PlotVisual._embed_figure -- call with a Figure to display it.
+            status_fn:     PlotVisual.status_bar.showMessage -- call with a str.
+            results_dir:   Path to the current results directory (for file dialogs).
+        """
+        pass

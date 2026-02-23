@@ -203,22 +203,6 @@ inferred_drag_coeff, wind_speed, baseline_ignition_altitude, fault_type, TARGET_
 
 ---
 
-## How to Run
-
-```bash
-# GUI mode
-python main.py
-
-# CLI single run
-python cli.py --mode single --config config_realistic.json
-
-# CLI optimization (Monte Carlo)
-python cli.py --mode optimize --config config_realistic.json --mc-runs 100
-
-# Visualization
-python PlotVisual.py
-```
-
 ---
 
 ## For AI Assistants

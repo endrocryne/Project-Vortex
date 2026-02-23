@@ -529,6 +529,13 @@ class SimulationGUI:
         self.show_plots = tk.BooleanVar(value=False)
         ttk.Checkbutton(frame, text="Show plots after run", variable=self.show_plots).grid(row=9, column=0, columnspan=2, sticky='w', pady=(5,0))
         
+        # Simulation backend selector (Vortex native or RocketPy extension)
+        ttk.Label(frame, text="Simulation Backend:").grid(row=10, column=0, sticky='w', pady=(8,0))
+        self.sim_backend = tk.StringVar(value="vortex")
+        self.cb_sim_backend = ttk.Combobox(frame, textvariable=self.sim_backend, values=["vortex", "rocketpy"], state="readonly", width=12)
+        self.cb_sim_backend.grid(row=10, column=1, pady=(8,0))
+        ttk.Label(frame, text="(Select 'rocketpy' to use the RocketPy extension)").grid(row=11, column=0, columnspan=2, sticky='w', padx=2, pady=(2,0))
+        
         # Variation parameters
         frame = ttk.LabelFrame(tab, text="Monte Carlo Variations", padding=10)
         frame.pack(fill='x', padx=5, pady=5)
@@ -1498,6 +1505,7 @@ class SimulationGUI:
         }
         
         sim_config = {
+            'backend': self.sim_backend.get(),
             'num_monte_carlo': self.num_monte_carlo.get(),
             'altitude_search_range': self.altitude_search_range.get(),
             'altitude_step': self.altitude_step.get(),
@@ -1646,9 +1654,21 @@ class SimulationGUI:
                     fault_config, ml_config
                 ).simulation  # Access wrapped simulation for compatibility
             else:
-                self.simulation = SuicideBurnSimulation(
-                    rocket_config, environment_config, simulation_config
-                )
+                # Respect simulation backend selection (supports 'rocketpy' via extension)
+                backend = simulation_config.get('backend', 'vortex')
+                if backend == 'rocketpy' and getattr(self, 'ext_manager', None):
+                    ext = self.ext_manager.get_instance('rocketpy_integration')
+                    if ext and hasattr(ext, 'create_simulation'):
+                        try:
+                            simulation_config = ext.pre_simulation(simulation_config) or simulation_config
+                            self.simulation = ext.create_simulation(rocket_config, environment_config, simulation_config)
+                        except Exception as e:
+                            self.log(f"[RocketPy] Failed to create RocketPy simulation: {e}")
+                            self.simulation = SuicideBurnSimulation(rocket_config, environment_config, simulation_config)
+                    else:
+                        self.simulation = SuicideBurnSimulation(rocket_config, environment_config, simulation_config)
+                else:
+                    self.simulation = SuicideBurnSimulation(rocket_config, environment_config, simulation_config)
             
             # Initial state
             initial_altitude = self.initial_altitude.get()
@@ -1748,11 +1768,27 @@ class SimulationGUI:
                 self.simulation = enhanced_sim.simulation  # For compatibility
                 use_enhanced = True
             else:
-                self.simulation = SuicideBurnSimulation(
-                    rocket_config, environment_config, simulation_config
-                )
-                enhanced_sim = None
-                use_enhanced = False
+                # Respect simulation backend selection (supports 'rocketpy' via extension)
+                backend = simulation_config.get('backend', 'vortex')
+                if backend == 'rocketpy' and getattr(self, 'ext_manager', None):
+                    ext = self.ext_manager.get_instance('rocketpy_integration')
+                    if ext and hasattr(ext, 'create_simulation'):
+                        try:
+                            simulation_config = ext.pre_simulation(simulation_config) or simulation_config
+                            self.simulation = ext.create_simulation(rocket_config, environment_config, simulation_config)
+                        except Exception as e:
+                            self.log(f"[RocketPy] Failed to create RocketPy simulation: {e}")
+                            enhanced_sim = None
+                            use_enhanced = False
+                            self.simulation = SuicideBurnSimulation(rocket_config, environment_config, simulation_config)
+                    else:
+                        self.simulation = SuicideBurnSimulation(rocket_config, environment_config, simulation_config)
+                        enhanced_sim = None
+                        use_enhanced = False
+                else:
+                    self.simulation = SuicideBurnSimulation(rocket_config, environment_config, simulation_config)
+                    enhanced_sim = None
+                    use_enhanced = False
             
             # Initial state
             initial_altitude = self.initial_altitude.get()
@@ -2308,6 +2344,7 @@ class SimulationGUI:
                 if 'ignition_hard_offset' in sim: self.ignition_hard_offset.set(sim['ignition_hard_offset'])
                 if 'show_plots' in sim: self.show_plots.set(sim['show_plots'])
                 if 'simulate_ascent' in sim: self.simulate_ascent.set(sim['simulate_ascent'])
+                if 'backend' in sim: self.sim_backend.set(sim.get('backend', 'vortex'))
                 
                 # Adaptive optimization parameters
                 if 'optimization_mode' in sim: self.opt_mode.set(sim['optimization_mode'])

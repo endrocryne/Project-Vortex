@@ -1,0 +1,14 @@
+{
+  "id": "optimization_analyzer",
+  "name": "Optimization Analyzer",
+  "version": "1.0.0",
+  "extension_type": "plotvisual",
+  "entry_point": "plugin",
+  "author": "Project Vortex",
+  "description": "One-shot optimization run analyzer. Load any results folder and instantly generate: Success Rate vs Ignition Altitude, 4-Panel Trajectory Profile, Grid Search Heatmap, Landing Accuracy, Landing Accuracy Top-Down, and Monte Carlo Analysis.",
+  "min_vortex_version": "0.0.0",
+  "icon": "🎯",
+  "tags": ["optimization", "analysis", "monte-carlo", "landing", "trajectory", "graphs"],
+  "license": "MIT",
+  "dependencies": []
+}

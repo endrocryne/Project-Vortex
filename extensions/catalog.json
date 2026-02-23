@@ -1,7 +1,21 @@
 {
   "catalog_version": 1,
-  "last_updated": "2026-02-17",
+  "last_updated": "2026-02-18",
   "extensions": [
+    {
+      "id": "optimization_analyzer",
+      "name": "Optimization Analyzer",
+      "version": "1.0.0",
+      "extension_type": "plotvisual",
+      "author": "Project Vortex",
+      "description": "One-shot optimization run analyzer. Load any results folder and instantly generate 6 graphs: Success Rate vs Ignition Altitude, 4-Panel Trajectory Profile, Grid Search Heatmap, Landing Accuracy, Landing Accuracy Top-Down, and Monte Carlo Analysis.",
+      "icon": "🎯",
+      "tags": ["optimization", "analysis", "monte-carlo", "landing", "trajectory", "graphs"],
+      "category": "Analysis",
+      "bundled": false,
+      "featured": true,
+      "download_url": "local://dist/optimization_analyzer-1.0.0.vortexext"
+    },
     {
       "id": "claude_graphs",
       "name": "Claude Graphs — ISEF Suite",

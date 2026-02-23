@@ -467,6 +467,20 @@ class PlotVisualWindow(QMainWindow):
                 btn.clicked.connect(partial(self._render_plugin_graph, key))
                 layout.addWidget(btn)
 
+        # Let extensions inject their own sidebar panels (e.g. comparison loaders)
+        # Use the ext_graph_container layout so panels appear inside the scroll area
+        for ext in self.ext_registry.get_extensions():
+            if hasattr(ext, 'inject_sidebar_panel'):
+                try:
+                    ext.inject_sidebar_panel(
+                        layout, self.data_store,
+                        self._embed_figure,
+                        self.status_bar.showMessage,
+                        RESULTS_DIR,
+                    )
+                except Exception:
+                    traceback.print_exc()
+
     # ------------------------------------------------------------------
     # Theme management
     # ------------------------------------------------------------------
@@ -705,11 +719,21 @@ class PlotVisualWindow(QMainWindow):
         graphs_title.setFont(QFont('Segoe UI', 16, QFont.Bold))
         left_layout.addWidget(graphs_title)
 
+        # All graph buttons inside a scrollable area so the sidebar never overflows
+        _scroll = QScrollArea()
+        _scroll.setWidgetResizable(True)
+        _scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        _scroll.setFrameShape(QFrame.NoFrame)
+        _scroll_widget = QWidget()
+        _scroll_layout = QVBoxLayout(_scroll_widget)
+        _scroll_layout.setContentsMargins(0, 0, 0, 0)
+        _scroll_layout.setSpacing(4)
+
         # Built-in graphs
         builtin_label = QLabel('Built-in')
         builtin_label.setProperty('class', 'muted')
         builtin_label.setStyleSheet('font-weight: bold; padding-left: 4px;')
-        left_layout.addWidget(builtin_label)
+        _scroll_layout.addWidget(builtin_label)
 
         builtin_graphs = [
             ('\U0001F3AF', 'Velocity vs Intensity', 'Landing velocity scatter plot by fault intensity'),
@@ -723,14 +747,19 @@ class PlotVisualWindow(QMainWindow):
         for icon, label, desc in builtin_graphs:
             btn = GraphButton(icon, label, desc)
             btn.clicked.connect(partial(self._on_builtin_graph, label))
-            left_layout.addWidget(btn)
+            _scroll_layout.addWidget(btn)
             self._graph_buttons[label] = btn
 
         # Extension graphs container (populated after extensions load)
         self._ext_graph_container = QWidget()
-        left_layout.addWidget(self._ext_graph_container)
+        _scroll_layout.addWidget(self._ext_graph_container)
 
-        left_layout.addStretch()
+        _scroll_layout.addStretch()
+        _scroll.setWidget(_scroll_widget)
+        left_layout.addWidget(_scroll, stretch=1)
+
+        # Store reference so _populate_extension_graphs can inject extension panels here
+        self._graphs_page_left_layout = left_layout
 
         # Filters section
         filter_group = QGroupBox('Filters')
@@ -1007,11 +1036,33 @@ class PlotVisualWindow(QMainWindow):
         if not entry:
             return
         if entry.download_url:
-            QMessageBox.information(
-                self, 'Download Required',
-                f'Download the extension from:\n{entry.download_url}\n\n'
-                'Then install via the Develop tab.'
-            )
+            # Resolve local:// URLs to an absolute path relative to the app root
+            if entry.download_url.startswith('local://'):
+                rel_path = entry.download_url[len('local://'):]
+                app_root = os.path.dirname(os.path.abspath(__file__))
+                abs_path = os.path.join(app_root, rel_path.replace('/', os.sep))
+                if os.path.exists(abs_path):
+                    try:
+                        manifest = self.ext_manager.install_from_vortexext(abs_path)
+                        QMessageBox.information(
+                            self, 'Installed',
+                            f'✅  {manifest.name} v{manifest.version} installed successfully!\n\n'
+                            'Restart PlotVisual to load the extension.'
+                        )
+                        self._refresh_store_list()
+                    except Exception as exc:
+                        QMessageBox.critical(self, 'Install Failed', str(exc))
+                else:
+                    QMessageBox.warning(
+                        self, 'File Not Found',
+                        f'Could not find the extension archive at:\n{abs_path}'
+                    )
+            else:
+                QMessageBox.information(
+                    self, 'Download Required',
+                    f'Download the extension from:\n{entry.download_url}\n\n'
+                    'Then install via the Develop tab.'
+                )
 
     def _build_develop_tab(self):
         """Build the Develop tab for extension developers."""
@@ -1407,8 +1458,20 @@ class PlotVisualWindow(QMainWindow):
         try:
             df = pd.read_csv(filepath)
             cols = set(df.columns)
+            filename = os.path.basename(filepath)
 
-            if {'Time', 'X', 'Y', 'Z', 'VX', 'VY', 'VZ'}.issubset(cols):
+            # Check for RocketPy-specific files first
+            if 'grid_search' in filename.lower():
+                self.data_store.set('rocketpy_grid_search', df, {'source': filepath})
+                self.status_bar.showMessage(f'Loaded RocketPy grid search: {len(df)} rows')
+            elif 'rocketpy_trajectory' in filename.lower():
+                self.data_store.set('rocketpy_trajectory', df, {'source': filepath})
+                self.status_bar.showMessage(f'Loaded RocketPy trajectory: {len(df)} rows')
+            elif 'rocketpy_single_run' in filename.lower() or 'rocketpy' in filename.lower():
+                self.data_store.set('rocketpy_single_run', df, {'source': filepath})
+                self.status_bar.showMessage(f'Loaded RocketPy single run: {len(df)} rows')
+            # Standard Vortex data detection by columns
+            elif {'Time', 'X', 'Y', 'Z', 'VX', 'VY', 'VZ'}.issubset(cols):
                 self.data_store.set('trajectory', df, {'source': filepath})
                 self.status_bar.showMessage(f'Loaded trajectory: {len(df)} rows')
             elif any('ignition' in c.lower() for c in cols) and any('success' in c.lower() for c in cols):
@@ -1502,19 +1565,26 @@ class PlotVisualWindow(QMainWindow):
             air_density = np.random.uniform(1.15, 1.25)
             initial_alt = np.random.uniform(900, 1300)
             initial_vel = np.random.uniform(45, 65)
-            fault_intensity = np.random.beta(2, 4) * 0.98
+            # Fault intensity on 0-10 scale (beta(2,4) skews toward low-medium values)
+            fault_intensity = np.random.beta(2, 4) * 10.0
 
-            base_landing_vel = np.random.uniform(0.5, 1.0)
+            base_landing_vel = np.random.uniform(0.3, 0.8)
             mass_impact = (dry_mass + propellant_mass - 55) * 0.04
-            wind_impact = wind_speed * 0.12
+            wind_impact = wind_speed * 0.10
 
-            # Optimization agent
-            opt_fault = (fault_intensity ** 3.8) * 45.0
-            opt_vel = base_landing_vel + opt_fault + mass_impact + wind_impact
-            opt_vel += np.random.normal(0, 0.1 + fault_intensity * 8)
+            # Normalized 0-1 for formula exponents
+            fi = fault_intensity / 10.0
+
+            # Optimization agent: similar to ML at low intensity, then balloons sharply
+            # Noise is small at low intensity (quadratic growth) so low-intensity points
+            # look similar to ML, then explodes at high intensity
+            opt_fault = (fi ** 3.0) * 72.0
+            opt_noise = np.random.exponential(0.15 + fi ** 2 * 11.0)
+            opt_base_vel = base_landing_vel + mass_impact + wind_impact
+            opt_vel = opt_base_vel + opt_fault + opt_noise
             opt_vel = max(0.1, opt_vel)
-            opt_base = 4 + wind_speed * 0.5 + (fault_intensity ** 2.2) * 50
-            opt_err = np.random.rayleigh(opt_base)
+            opt_scatter = max(0.5, 3 + wind_speed * 0.4 + fi ** 2 * 40)
+            opt_err = np.random.rayleigh(opt_scatter)
             opt_x, opt_y = np.random.normal(0, opt_err), np.random.normal(0, opt_err)
             records.append({
                 'Type': 'Optimization', 'Landing Velocity': opt_vel,
@@ -1528,17 +1598,20 @@ class PlotVisualWindow(QMainWindow):
                 'Landing Distance': np.sqrt(opt_x**2 + opt_y**2)
             })
 
-            # ML agent
-            ml_base = base_landing_vel + (fault_intensity * 6.5)
-            ml_vel = ml_base + (mass_impact * 0.4) + (wind_impact * 0.3)
-            ml_vel += np.random.normal(0, 0.1 + fault_intensity * 0.3)
-            if np.random.rand() < 0.97:
-                ml_vel = min(ml_vel, 2.0)
+            # ML agent: stays naturally below 2 m/s until ~7.5 intensity, then fails
+            ML_FAIL_THRESHOLD = 0.75  # fi (= intensity/10) where ML starts failing
+            if fi < ML_FAIL_THRESHOLD:
+                # Controlled regime: velocity rises gently from ~0.4 to ~1.7 m/s
+                ml_vel = 0.38 + fi * 1.65 + (mass_impact * 0.18) + (wind_impact * 0.12)
+                ml_vel += np.random.normal(0, 0.10 + fi * 0.20)
+                ml_vel = max(0.1, min(ml_vel, 1.93))
             else:
-                ml_vel = min(ml_vel, 35.0)
-            ml_vel = max(0.1, ml_vel)
-            ml_hbase = 2 + wind_speed * 0.15 + fault_intensity * 5
-            ml_err = np.random.rayleigh(ml_hbase)
+                # Failure regime: escalates rapidly above threshold
+                fail_factor = (fi - ML_FAIL_THRESHOLD) / (1.0 - ML_FAIL_THRESHOLD)
+                ml_vel = 1.8 + fail_factor ** 1.2 * 28.0 + np.random.exponential(fail_factor * 7.0 + 0.4)
+                ml_vel = max(0.1, ml_vel)
+            ml_scatter = max(0.5, 2 + wind_speed * 0.12 + fi * 4)
+            ml_err = np.random.rayleigh(ml_scatter)
             ml_x, ml_y = np.random.normal(0, ml_err), np.random.normal(0, ml_err)
             records.append({
                 'Type': 'ML', 'Landing Velocity': ml_vel,

@@ -1,0 +1,95 @@
+newmtl mat_1_Nose Cone
+illum 2
+Ns 225.00002
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 1.0 1.0 1.0
+Ks 0.25 0.25 0.25
+newmtl mat_2_Body Tube
+illum 2
+Ns 225.00002
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 0.83137256 0.7254902 0.5686275
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 -clamp off C:\Users\rishi\Documents\Vortex\Project-Vortex\assets\l1l2-mfire_img\spiral-wound-alpha.png
+newmtl mat_3_Tube Coupler
+illum 2
+Ns 75.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 0.65882355 0.57254905 0.45490196
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 -clamp off C:\Users\rishi\Documents\Vortex\Project-Vortex\assets\l1l2-mfire_img\spiral-wound-alpha.png
+newmtl mat_4_Body Tube
+illum 2
+Ns 225.00002
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 0.83137256 0.7254902 0.5686275
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 -clamp off C:\Users\rishi\Documents\Vortex\Project-Vortex\assets\l1l2-mfire_img\spiral-wound-alpha.png
+newmtl mat_5_Inner Tube
+illum 2
+Ns 75.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 0.65882355 0.57254905 0.45490196
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 -clamp off C:\Users\rishi\Documents\Vortex\Project-Vortex\assets\l1l2-mfire_img\spiral-wound-alpha.png
+newmtl mat_5_Inner Tube_H100W_DMS
+illum 2
+Ns 0.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 0.003921569 0.003921569 0.003921569
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 -clamp off C:\Users\rishi\Documents\Vortex\Project-Vortex\assets\l1l2-mfire_img\aerotech.png
+newmtl mat_6_Centering Ring
+illum 2
+Ns 0.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 0.003921569 0.003921569 0.003921569
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 -clamp off C:\Users\rishi\Documents\Vortex\Project-Vortex\assets\l1l2-mfire_img\wood.jpg
+newmtl mat_7_Centering Ring
+illum 2
+Ns 0.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 0.003921569 0.003921569 0.003921569
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 -clamp off C:\Users\rishi\Documents\Vortex\Project-Vortex\assets\l1l2-mfire_img\wood.jpg
+newmtl mat_8_Centering Ring
+illum 2
+Ns 0.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 0.003921569 0.003921569 0.003921569
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 -clamp off C:\Users\rishi\Documents\Vortex\Project-Vortex\assets\l1l2-mfire_img\wood.jpg
+newmtl mat_9_Trapezoidal Fin Set
+illum 2
+Ns 0.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 0.003921569 0.003921569 0.003921569
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 -clamp off C:\Users\rishi\Documents\Vortex\Project-Vortex\assets\l1l2-mfire_img\balsa.jpg
+newmtl mat_10_Parachute, 36 in., nylon, 8 lines
+illum 2
+Ns 0.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 0.003921569 0.003921569 0.003921569
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 -clamp off C:\Users\rishi\Documents\Vortex\Project-Vortex\assets\l1l2-mfire_img\chute.jpg
+newmtl mat_11_Shock Cord
+illum 2
+Ns 0.0
+d 1.0
+Ka 0.0 0.0 0.0
+Kd 0.003921569 0.003921569 0.003921569
+Ks 0.25 0.25 0.25
+map_Kd -o 0.0 0.0 0.0 -s 1.0 1.0 1.0 -clamp off C:\Users\rishi\Documents\Vortex\Project-Vortex\assets\l1l2-mfire_img\wadding.png

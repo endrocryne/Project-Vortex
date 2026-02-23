@@ -93,6 +93,7 @@ class VortexDataStore:
         """
         Auto-detect and load all relevant CSVs from a results directory.
         Handles both single_run and optimization directory structures.
+        Includes RocketPy-specific files for comparison graphs.
         """
         if not os.path.isdir(dirpath):
             return
@@ -102,10 +103,33 @@ class VortexDataStore:
         if os.path.exists(opt_path):
             self.load_optimization_csv(opt_path)
 
-        # Check for single_run.csv
+        # Check for trajectory.csv (optimization best-run trajectory)
+        traj_path = os.path.join(dirpath, 'trajectory.csv')
+        if os.path.exists(traj_path):
+            self.load_trajectory_csv(traj_path)
+
+        # Check for single_run.csv (only if trajectory.csv wasn't found)
         sr_path = os.path.join(dirpath, 'single_run.csv')
-        if os.path.exists(sr_path):
+        if os.path.exists(sr_path) and not os.path.exists(traj_path):
             self.load_trajectory_csv(sr_path)
+
+        # Check for RocketPy grid search results
+        grid_search_path = os.path.join(dirpath, 'grid_search.csv')
+        if os.path.exists(grid_search_path):
+            df = pd.read_csv(grid_search_path)
+            self.set('rocketpy_grid_search', df, metadata={'source': grid_search_path, 'filename': 'grid_search.csv'})
+
+        # Check for RocketPy trajectory from optimization
+        rocketpy_traj_path = os.path.join(dirpath, 'rocketpy_trajectory.csv')
+        if os.path.exists(rocketpy_traj_path):
+            df = pd.read_csv(rocketpy_traj_path)
+            self.set('rocketpy_trajectory', df, metadata={'source': rocketpy_traj_path, 'filename': 'rocketpy_trajectory.csv'})
+
+        # Check for RocketPy single run trajectory
+        rocketpy_single_path = os.path.join(dirpath, 'rocketpy_single_run.csv')
+        if os.path.exists(rocketpy_single_path):
+            df = pd.read_csv(rocketpy_single_path)
+            self.set('rocketpy_single_run', df, metadata={'source': rocketpy_single_path, 'filename': 'rocketpy_single_run.csv'})
 
         # Check for trials directory
         trials_dir = os.path.join(dirpath, 'trials')

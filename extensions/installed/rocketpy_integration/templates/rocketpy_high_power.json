@@ -1,0 +1,89 @@
+{
+  "rocket": {
+    "dry_mass": 25.0,
+    "propellant_mass": 8.5,
+    "length": 3.5,
+    "diameter": 0.15,
+    "thrust_curve": [
+      [0, 0],
+      [0.05, 3500],
+      [0.2, 3200],
+      [1.0, 3000],
+      [2.5, 2800],
+      [3.0, 2500],
+      [3.3, 0]
+    ],
+    "burn_time": 3.3,
+    "thrust_variation": 0.05,
+    "mass_variation": 0.02,
+    "ascent_motor_casing_mass": 1.5
+  },
+  "environment": {
+    "gravity": 9.81,
+    "air_density": 1.225,
+    "temperature": 288.15,
+    "drag_coefficient": 0.45,
+    "wind_model": "constant",
+    "wind_speed": 5.0,
+    "wind_direction": 270.0,
+    "drag_variation": 0.1,
+    "air_density_variation": 0.05
+  },
+  "simulation": {
+    "altimeter_error": 0.01,
+    "velocity_sensor_error": 0.01,
+    "simulate_ascent": true
+  },
+  "rocketpy": {
+    "atmospheric_model": "standard_atmosphere",
+    "elevation": 1400.0,
+    "latitude": 32.99,
+    "longitude": -106.97,
+    "rail_length": 5.18,
+    "inclination": 85.0,
+    "heading": 0.0,
+    "max_time": 600.0,
+    "terminate_on_apogee": false,
+    "motor_type": "solid",
+    "grain_number": 5,
+    "grain_outer_radius": 0.033,
+    "grain_initial_inner_radius": 0.015,
+    "grain_initial_height": 0.12,
+    "grain_separation": 0.005,
+    "grain_density": 1815.0,
+    "nozzle_radius": 0.033,
+    "throat_radius": 0.011,
+    "motor_dry_mass": 1.5,
+    "motor_cg_position": 0.0,
+    "nozzle_position": 0.0,
+    "nose_length": 0.55,
+    "nose_kind": "Von Karman",
+    "nose_position": 3.5,
+    "center_of_mass_without_motor": 1.75,
+    "power_on_drag": 0.45,
+    "fins": {
+      "number": 4,
+      "root_chord": 0.12,
+      "tip_chord": 0.04,
+      "span": 0.1,
+      "position": 0.1
+    },
+    "rail_buttons": {
+      "upper_position": 2.45,
+      "lower_position": 0.7
+    },
+    "parachutes": [
+      {
+        "name": "Drogue",
+        "cd_s": 1.0,
+        "trigger": "apogee"
+      },
+      {
+        "name": "Main",
+        "cd_s": 10.0,
+        "trigger": "altitude",
+        "trigger_altitude": 450.0
+      }
+    ]
+  }
+}
