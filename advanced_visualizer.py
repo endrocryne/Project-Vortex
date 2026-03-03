@@ -1642,7 +1642,7 @@ class RocketVisualizer(QMainWindow):
             self.btn_play.setText("Pause")
             self.last_real_time = time.time()
             self._anim_clock = 0.0
-            self.timer.start(16)  # 60 FPS target
+            self.timer.start(12)  # ~80 FPS target
         else:
             self.btn_play.setText("Play")
             self.timer.stop()
@@ -1705,14 +1705,13 @@ class RocketVisualizer(QMainWindow):
         self._anim_clock += dt_real
 
         sim_dt = dt_real * self.playback_speed
-        frames_to_advance = int(sim_dt / self.time_step)
-
-        if frames_to_advance < 1 and sim_dt > 0:
+        
+        if sim_dt > 0:
             self.sim_time_accumulator += sim_dt
-            if self.sim_time_accumulator >= self.time_step:
-                frames_to_advance = int(self.sim_time_accumulator / self.time_step)
-                self.sim_time_accumulator -= frames_to_advance * self.time_step
+            frames_to_advance = int(self.sim_time_accumulator / self.time_step)
+            self.sim_time_accumulator -= frames_to_advance * self.time_step
         else:
+            frames_to_advance = 0
             self.sim_time_accumulator = 0
 
         new_frame = self.current_frame + frames_to_advance

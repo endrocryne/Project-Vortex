@@ -830,8 +830,8 @@ class PlotVisualApp:
         fig = Figure(figsize=(10, 10))
         ax = fig.add_subplot(111)
 
-        target_circle = plt.Circle((0, 0), 2, color='red', fill=False,
-                                   linewidth=3, label='Target (2m radius)', zorder=10)
+        target_circle = plt.Circle((0, 0), 15, color='red', fill=False,
+                                   linewidth=3, label='Target (15m radius)', zorder=10)
         ax.add_patch(target_circle)
 
         types = self.filtered_data['Type'].unique() if 'Type' in self.filtered_data.columns else ['All']

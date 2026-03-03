@@ -1,0 +1,23 @@
+{
+    "results_dir": "results/demo_runs",
+    "default_rocket_stl": "",
+    "flame_stl_path": "",
+    "explosion_stl_path": "",
+    "lat_scale": "1",
+    "scale_lat_enabled": true,
+    "vert_scale": "1",
+    "scale_vert_enabled": true,
+    "playback_speed": "1.0x",
+    "launch_lat": 37.748448,
+    "launch_lon": -85.378426,
+    "map_api_key": "",
+    "map_zoom": 14,
+    "map_enabled": true,
+    "camera_mode": "Follow",
+    "enable_ssao": false,
+    "enable_shadows": false,
+    "show_trail": true,
+    "mesh_decimate_target": 0.5,
+    "mesh_decimate_threshold": 50000,
+    "demo_mode": true
+}

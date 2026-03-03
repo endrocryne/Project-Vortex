@@ -11,14 +11,8 @@
     "version": "0.1.0",
     "settings": {}
   },
-  "rocketpy_integration": {
-    "enabled": true,
-    "installed_at": "2026-02-18T09:24:17.052993",
-    "version": "1.0.0",
-    "settings": {}
-  },
   "optimization_analyzer": {
-    "enabled": true,
+    "enabled": false,
     "installed_at": "bundled",
     "version": "1.0.0",
     "settings": {}

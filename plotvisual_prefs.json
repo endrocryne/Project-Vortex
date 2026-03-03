@@ -8,12 +8,19 @@
   },
   "plot": {
     "default_view": "velocity",
-    "yscale_velocity": "Linear",
+    "yscale_velocity": "Log",
     "marker_size": 49,
     "point_alpha": 0.6,
     "hist_bins": 30,
     "export_dpi": 300,
-    "show_grid": true
+    "show_grid": true,
+    "ml_epoch_show_line": true,
+    "ml_epoch_100_enabled": true,
+    "ml_epoch_500_enabled": true,
+    "ml_epoch_1200_enabled": true,
+    "ml_epoch_2000_enabled": true,
+    "ml_epoch_1_enabled": true,
+    "epoch_display_mode": "Data Points"
   },
   "appearance": {
     "theme": "Light",

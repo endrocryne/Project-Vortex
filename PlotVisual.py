@@ -737,6 +737,7 @@ class PlotVisualWindow(QMainWindow):
 
         builtin_graphs = [
             ('\U0001F3AF', 'Velocity vs Intensity', 'Landing velocity scatter plot by fault intensity'),
+            ('\U0001F9E0', 'ML Epoch Progression', 'ML accuracy vs baseline across training epochs'),
             ('\U0001F4CA', 'Success Rate Heatmap', 'Parameter sweep success rate heatmaps'),
             ('\U0001F4CF', 'Landing Accuracy', 'Distance-based accuracy distribution and scatter'),
             ('\U0001F3AF', 'Landing Top-Down', 'Top-down view of landing positions'),
@@ -775,6 +776,7 @@ class PlotVisualWindow(QMainWindow):
         filter_layout.addLayout(yscale_row)
 
         self._type_filter = QComboBox()
+        # cvxkerb removed from filter options as it's no longer plotted
         self._type_filter.addItems(['All', 'ML', 'Optimization'])
         self._type_filter.currentTextChanged.connect(self._apply_filters)
         type_row = QHBoxLayout()
@@ -857,6 +859,45 @@ class PlotVisualWindow(QMainWindow):
 
         right_layout.addSpacing(16)
 
+        # ML Epoch filters (shown only for ML Epoch Progression graph)
+        epoch_filters_label = QLabel('ML Epoch Filters')
+        epoch_filters_label.setProperty('class', 'subheading')
+        epoch_filters_label.setStyleSheet('font-weight: bold;')
+        right_layout.addWidget(epoch_filters_label)
+
+        # Display mode selector: Data Points vs Line of Best Fit
+        right_layout.addWidget(QLabel('Display Mode'))
+        self._epoch_display_mode = QComboBox()
+        self._epoch_display_mode.addItems(['Data Points', 'Line of Best Fit'])
+        saved_mode = self.prefs.get('plot', 'epoch_display_mode', 'Data Points')
+        idx = self._epoch_display_mode.findText(saved_mode)
+        if idx >= 0:
+            self._epoch_display_mode.setCurrentIndex(idx)
+        self._epoch_display_mode.currentTextChanged.connect(self._on_epoch_display_mode_changed)
+        right_layout.addWidget(self._epoch_display_mode)
+
+        right_layout.addSpacing(8)
+
+        # Store epoch checkboxes as dict
+        self._ml_epoch_cbs = {}
+        epoch_specs = [
+            (1, 'Epoch 1 (untrained)'),
+            (100, 'Epoch 100 (early)'),
+            (500, 'Epoch 500 (approaching)'),
+            (1200, 'Epoch 1200 (matching)'),
+            (2000, 'Epoch 2000 (final)'),
+        ]
+        for epoch, label in epoch_specs:
+            cb = QCheckBox(label)
+            # Load from prefs, default to True (all epochs shown)
+            default_val = self.prefs.get('plot', f'ml_epoch_{epoch}_enabled', True)
+            cb.setChecked(default_val)
+            cb.toggled.connect(lambda checked, e=epoch: self._on_ml_epoch_toggled(e, checked))
+            right_layout.addWidget(cb)
+            self._ml_epoch_cbs[epoch] = cb
+
+        right_layout.addSpacing(16)
+
         # Export button
         export_btn = QPushButton('\U0001F4BE  Export Plot')
         export_btn.setProperty('class', 'primary')
@@ -872,6 +913,7 @@ class PlotVisualWindow(QMainWindow):
         """Handle built-in graph selection."""
         dispatch = {
             'Velocity vs Intensity': self._plot_velocity_vs_intensity,
+            'ML Epoch Progression': self._plot_ml_epoch_progression,
             'Success Rate Heatmap': self._plot_success_heatmap,
             'Landing Accuracy': self._plot_landing_accuracy,
             'Landing Top-Down': self._plot_landing_topdown,
@@ -1529,18 +1571,22 @@ class PlotVisualWindow(QMainWindow):
                 except Exception:
                     traceback.print_exc()
 
-            # Generate built-in data if not present
-            if not self.data_store.has('legacy'):
-                sample_dir = os.path.join(RESULTS_DIR, 'sample_data')
-                os.makedirs(sample_dir, exist_ok=True)
-                sample_file = os.path.join(sample_dir, 'sample_visualization_data.csv')
-                self._generate_sample_data(sample_file)
-                self.data_store.load_csv(sample_file, 'legacy')
+            # Always regenerate built-in sample data so changes take effect immediately
+            self.data_store.remove('legacy')
+            sample_dir = os.path.join(RESULTS_DIR, 'sample_data')
+            os.makedirs(sample_dir, exist_ok=True)
+            sample_file = os.path.join(sample_dir, 'sample_visualization_data.csv')
+            self._generate_sample_data(sample_file)
+            self.data_store.load_csv(sample_file, 'legacy')
 
             legacy = self.data_store.get('legacy')
             if legacy is not None:
                 self.data = legacy
                 self.filtered_data = legacy.copy()
+
+            # Generate ML epoch progression data and store separately
+            ml_epoch_df = self._generate_ml_epoch_data()
+            self.data_store.set('ml_epochs', ml_epoch_df, {'source': 'sample'})
 
             self._update_data_summary()
             self.status_bar.showMessage('Sample data loaded for all graphs')
@@ -1549,81 +1595,205 @@ class PlotVisualWindow(QMainWindow):
             QMessageBox.critical(self, 'Error', f'Failed to generate sample data:\n{str(e)}')
             traceback.print_exc()
 
+    def _generate_ml_epoch_data(self):
+        """Generate synthetic ML training progression data across epochs.
+
+        Simulates an 8-layer / 14,337-param network trained for 2000 epochs.
+        Returns a DataFrame with columns:
+            Epoch, Total Fault Intensity, Landing Velocity, Type
+        Five snapshot epochs are produced:
+            1    – untrained (horrid)
+            100  – early learning (still poor)
+            500  – approaching optimisation baseline
+            1200 – matching baseline
+            2000 – final state, exceeding baseline
+        The Optimization (baseline) series is also included so the graph
+        can overlay everything in one plot.
+        """
+        np.random.seed(99)
+        fault_levels = np.arange(0.0, 1.02, 0.02)  # 51 levels
+        trials_per_level = 9
+        epochs = [1, 100, 500, 1200, 2000]
+        records = []
+
+        for fault_intensity in fault_levels:
+            fi = fault_intensity
+            for trial in range(trials_per_level):
+                dry_mass = np.random.uniform(45, 65)
+                propellant_mass = np.random.uniform(8, 12)
+                wind_speed = np.random.uniform(0, 12)
+                mass_impact = (dry_mass + propellant_mass - 55) * 0.04
+                wind_impact = wind_speed * 0.10
+                shared_base = 0.38 + mass_impact * 0.04 + wind_impact * 0.03
+
+                # --- Optimisation baseline (same curve as main graph) ---
+                opt_fault = (fi ** 3.0) * 72.0
+                opt_noise = np.random.exponential(0.08 + fi ** 2 * 11.0)
+                opt_vel = max(0.1, shared_base + opt_fault + opt_noise)
+                opt_vel = np.clip(opt_vel, 0.1, 83.0)  # Cap at terminal velocity (83 m/s)
+                records.append({
+                    'Epoch': 0, 'Type': 'Optimization',
+                    'Total Fault Intensity': fault_intensity,
+                    'Landing Velocity': opt_vel,
+                })
+
+                # --- ML snapshots at each epoch ---
+                # Every epoch shares the same spike-then-explode shape as the
+                # final model, but the failure threshold shifts rightward as
+                # training progresses.  Early epochs fail almost immediately
+                # (threshold near 0), later epochs push the knee further out.
+                epoch_cfg = {
+                    1:    {'threshold_lo': 0.04, 'threshold_hi': 0.10,  # spikes immediately
+                           'pre_scale': 6.5,   'pre_noise': 2.5,        # FAR above baseline pre-spike
+                           'spike_exp': 5.5,   'spike_noise_base': 4.0, # brutal explosion
+                           'flat': False},
+                    100:  {'threshold_lo': 0.28, 'threshold_hi': 0.38,
+                           'pre_scale': 1.8,   'pre_noise': 0.8,
+                           'spike_exp': 4.5,   'spike_noise_base': 2.0,
+                           'flat': False},
+                    500:  {'threshold_lo': 0.48, 'threshold_hi': 0.58,
+                           'pre_scale': 0.9,   'pre_noise': 0.35,
+                           'spike_exp': 4.0,   'spike_noise_base': 1.2,
+                           'flat': False},
+                    1200: {'threshold_lo': 0.65, 'threshold_hi': 0.72,
+                           'pre_scale': 0.55,  'pre_noise': 0.15,
+                           'spike_exp': 3.8,   'spike_noise_base': 0.7,
+                           'flat': False},
+                    2000: {'threshold_lo': 0.72, 'threshold_hi': 0.85,
+                           'pre_scale': 0.45,  'pre_noise': 0.09,
+                           'spike_exp': 3.5,   'spike_noise_base': 0.5,
+                           'flat': True},   # 2000 uses original flat-then-spike logic
+                }
+
+                for epoch in epochs:
+                    cfg = epoch_cfg[epoch]
+
+                    if cfg['flat']:
+                        # Original Epoch 2000 path (flat, well-controlled until threshold)
+                        ml_fail_threshold = np.random.uniform(cfg['threshold_lo'], cfg['threshold_hi'])
+                        if fi < ml_fail_threshold:
+                            vel = shared_base + fi * 0.45
+                            vel += np.random.normal(0, 0.08 + fi * 0.10)
+                            vel = max(0.1, min(vel, 1.85))
+                        else:
+                            fail_factor = (fi - ml_fail_threshold) / (1.0 - ml_fail_threshold)
+                            vel = (shared_base + ml_fail_threshold * 0.45
+                                   + np.exp(fail_factor * cfg['spike_exp']) - 1.0
+                                   + np.random.exponential(cfg['spike_noise_base'] + fail_factor * 2.5))
+                            vel = max(0.1, vel)
+                        vel = np.clip(vel, 0.1, 83.0)  # Cap at terminal velocity (83 m/s)
+                    else:
+                        ml_fail_threshold = np.random.uniform(cfg['threshold_lo'], cfg['threshold_hi'])
+                        if fi < ml_fail_threshold:
+                            # Pre-spike: model is outputting something, but elevated above baseline
+                            pre_vel = shared_base + fi * cfg['pre_scale']
+                            pre_vel += np.random.exponential(cfg['pre_noise'] + fi * 0.5)
+                            vel = max(0.1, pre_vel)
+                        else:
+                            # Spike: exponential blowup, harsher for earlier epochs
+                            fail_factor = (fi - ml_fail_threshold) / (1.0 - ml_fail_threshold)
+                            vel = (shared_base + ml_fail_threshold * cfg['pre_scale']
+                                   + np.exp(fail_factor * cfg['spike_exp']) - 1.0
+                                   + np.random.exponential(cfg['spike_noise_base'] + fail_factor * 3.0))
+                            vel = max(0.1, vel)
+                        vel = np.clip(vel, 0.1, 83.0)  # Cap at terminal velocity (83 m/s)
+                    records.append({
+                        'Epoch': epoch, 'Type': 'ML',
+                        'Total Fault Intensity': fault_intensity,
+                        'Landing Velocity': vel,
+                    })
+
+        return pd.DataFrame(records)
+
     def _generate_sample_data(self, output_file):
         """Generate realistic sample data for built-in visualizations."""
         os.makedirs(os.path.dirname(output_file), exist_ok=True)
         np.random.seed(42)
         records = []
 
-        for i in range(150):
-            dry_mass = np.random.uniform(45, 65)
-            propellant_mass = np.random.uniform(8, 12)
-            diameter = np.random.uniform(0.3, 0.4)
-            thrust_avg = np.random.uniform(900, 1100)
-            wind_speed = np.random.uniform(0, 12)
-            drag_coef = np.random.uniform(0.45, 0.65)
-            air_density = np.random.uniform(1.15, 1.25)
-            initial_alt = np.random.uniform(900, 1300)
-            initial_vel = np.random.uniform(45, 65)
-            # Fault intensity on 0-10 scale (beta(2,4) skews toward low-medium values)
-            fault_intensity = np.random.beta(2, 4) * 10.0
+        # Discrete fault intensity levels from 0.00 to 1.00 in 0.02 steps
+        # simulating testing at fixed fault intensity intervals
+        fault_levels = np.arange(0.0, 1.02, 0.02)  # 51 levels: 0.00, 0.02, ..., 1.00
+        trials_per_level = 9  # 9 trials per intensity level
 
-            base_landing_vel = np.random.uniform(0.3, 0.8)
-            mass_impact = (dry_mass + propellant_mass - 55) * 0.04
-            wind_impact = wind_speed * 0.10
+        for fault_intensity in fault_levels:
+            fi = fault_intensity  # already 0-1 scale
 
-            # Normalized 0-1 for formula exponents
-            fi = fault_intensity / 10.0
+            for trial in range(trials_per_level):
+                dry_mass = np.random.uniform(45, 65)
+                propellant_mass = np.random.uniform(8, 12)
+                diameter = np.random.uniform(0.3, 0.4)
+                thrust_avg = np.random.uniform(900, 1100)
+                wind_speed = np.random.uniform(0, 12)
+                drag_coef = np.random.uniform(0.45, 0.65)
+                air_density = np.random.uniform(1.15, 1.25)
+                initial_alt = np.random.uniform(900, 1300)
+                initial_vel = np.random.uniform(45, 65)
 
-            # Optimization agent: similar to ML at low intensity, then balloons sharply
-            # Noise is small at low intensity (quadratic growth) so low-intensity points
-            # look similar to ML, then explodes at high intensity
-            opt_fault = (fi ** 3.0) * 72.0
-            opt_noise = np.random.exponential(0.15 + fi ** 2 * 11.0)
-            opt_base_vel = base_landing_vel + mass_impact + wind_impact
-            opt_vel = opt_base_vel + opt_fault + opt_noise
-            opt_vel = max(0.1, opt_vel)
-            opt_scatter = max(0.5, 3 + wind_speed * 0.4 + fi ** 2 * 40)
-            opt_err = np.random.rayleigh(opt_scatter)
-            opt_x, opt_y = np.random.normal(0, opt_err), np.random.normal(0, opt_err)
-            records.append({
-                'Type': 'Optimization', 'Landing Velocity': opt_vel,
-                'Success': opt_vel < 2.0, 'Total Fault Intensity': fault_intensity,
-                'Dry Mass': dry_mass, 'Propellant Mass': propellant_mass,
-                'Diameter': diameter, 'Thrust Average': thrust_avg,
-                'Wind Speed': wind_speed, 'Drag Coefficient': drag_coef,
-                'Air Density': air_density, 'Initial Altitude': initial_alt,
-                'Initial Velocity': initial_vel,
-                'Landing X': opt_x, 'Landing Y': opt_y,
-                'Landing Distance': np.sqrt(opt_x**2 + opt_y**2)
-            })
+                mass_impact = (dry_mass + propellant_mass - 55) * 0.04
+                wind_impact = wind_speed * 0.10
 
-            # ML agent: stays naturally below 2 m/s until ~7.5 intensity, then fails
-            ML_FAIL_THRESHOLD = 0.75  # fi (= intensity/10) where ML starts failing
-            if fi < ML_FAIL_THRESHOLD:
-                # Controlled regime: velocity rises gently from ~0.4 to ~1.7 m/s
-                ml_vel = 0.38 + fi * 1.65 + (mass_impact * 0.18) + (wind_impact * 0.12)
-                ml_vel += np.random.normal(0, 0.10 + fi * 0.20)
-                ml_vel = max(0.1, min(ml_vel, 1.93))
-            else:
-                # Failure regime: escalates rapidly above threshold
-                fail_factor = (fi - ML_FAIL_THRESHOLD) / (1.0 - ML_FAIL_THRESHOLD)
-                ml_vel = 1.8 + fail_factor ** 1.2 * 28.0 + np.random.exponential(fail_factor * 7.0 + 0.4)
-                ml_vel = max(0.1, ml_vel)
-            ml_scatter = max(0.5, 2 + wind_speed * 0.12 + fi * 4)
-            ml_err = np.random.rayleigh(ml_scatter)
-            ml_x, ml_y = np.random.normal(0, ml_err), np.random.normal(0, ml_err)
-            records.append({
-                'Type': 'ML', 'Landing Velocity': ml_vel,
-                'Success': ml_vel < 2.0, 'Total Fault Intensity': fault_intensity,
-                'Dry Mass': dry_mass, 'Propellant Mass': propellant_mass,
-                'Diameter': diameter, 'Thrust Average': thrust_avg,
-                'Wind Speed': wind_speed, 'Drag Coefficient': drag_coef,
-                'Air Density': air_density, 'Initial Altitude': initial_alt,
-                'Initial Velocity': initial_vel,
-                'Landing X': ml_x, 'Landing Y': ml_y,
-                'Landing Distance': np.sqrt(ml_x**2 + ml_y**2)
-            })
+                # Shared starting velocity — both agents begin at the same point at fi=0
+                shared_base = 0.38 + mass_impact * 0.04 + wind_impact * 0.03
+
+                # --- Baseline / Optimization agent ---
+                # Starts at shared_base, grows cubically with fault intensity
+                opt_fault = (fi ** 3.0) * 72.0
+                opt_noise = np.random.exponential(0.08 + fi ** 2 * 11.0)
+                opt_vel = shared_base + opt_fault + opt_noise
+                opt_vel = np.clip(max(0.1, opt_vel), 0.1, 83.0)  # Cap at terminal velocity (83 m/s)
+                opt_scatter = max(0.5, 3 + wind_speed * 0.4 + fi ** 2 * 40)
+                opt_err = np.random.rayleigh(opt_scatter)
+                opt_x, opt_y = np.random.normal(0, opt_err), np.random.normal(0, opt_err)
+                records.append({
+                    'Type': 'Optimization', 'Landing Velocity': opt_vel,
+                    'Success': opt_vel < 2.0, 'Total Fault Intensity': fault_intensity,
+                    'Dry Mass': dry_mass, 'Propellant Mass': propellant_mass,
+                    'Diameter': diameter, 'Thrust Average': thrust_avg,
+                    'Wind Speed': wind_speed, 'Drag Coefficient': drag_coef,
+                    'Air Density': air_density, 'Initial Altitude': initial_alt,
+                    'Initial Velocity': initial_vel,
+                    'Landing X': opt_x, 'Landing Y': opt_y,
+                    'Landing Distance': np.sqrt(opt_x**2 + opt_y**2)
+                })
+
+                # --- ML agent ---
+                # Per-trial randomized failure threshold between 0.72 and 0.85
+                # so the spike region has natural spread across trials
+                ml_fail_threshold = np.random.uniform(0.72, 0.85)
+
+                if fi < ml_fail_threshold:
+                    # Controlled regime: nearly flat from shared_base
+                    ml_vel = shared_base + fi * 0.45
+                    ml_vel += np.random.normal(0, 0.08 + fi * 0.10)
+                    ml_vel = np.clip(max(0.1, min(ml_vel, 1.85)), 0.1, 83.0)  # Cap at terminal velocity (83 m/s)
+                else:
+                    # Failure regime: exponential spike above threshold
+                    fail_factor = (fi - ml_fail_threshold) / (1.0 - ml_fail_threshold)
+                    ml_vel = (shared_base + ml_fail_threshold * 0.45  # level just before spike
+                              + np.exp(fail_factor * 3.5) - 1.0       # exponential blowup
+                              + np.random.exponential(0.5 + fail_factor * 2.5))
+                    ml_vel = np.clip(max(0.1, ml_vel), 0.1, 83.0)  # Cap at terminal velocity (83 m/s)
+                ml_scatter = max(0.5, 2 + wind_speed * 0.12 + fi * 4)
+                ml_err = np.random.rayleigh(ml_scatter)
+                ml_x, ml_y = np.random.normal(0, ml_err), np.random.normal(0, ml_err)
+                records.append({
+                    'Type': 'ML', 'Landing Velocity': ml_vel,
+                    'Success': ml_vel < 2.0, 'Total Fault Intensity': fault_intensity,
+                    'Dry Mass': dry_mass, 'Propellant Mass': propellant_mass,
+                    'Diameter': diameter, 'Thrust Average': thrust_avg,
+                    'Wind Speed': wind_speed, 'Drag Coefficient': drag_coef,
+                    'Air Density': air_density, 'Initial Altitude': initial_alt,
+                    'Initial Velocity': initial_vel,
+                    'Landing X': ml_x, 'Landing Y': ml_y,
+                    'Landing Distance': np.sqrt(ml_x**2 + ml_y**2)
+                })
+
+                # previously there was a cvxkerb agent here generating a
+                # baseline record.  The solver type has been deprecated for
+                # plotting and thus we no longer append any cvxkerb rows.
+                # (code removed to keep sample data simpler)
+                pass
 
         df = pd.DataFrame(records)
         df.to_csv(output_file, index=False)
@@ -1678,6 +1848,19 @@ class PlotVisualWindow(QMainWindow):
 
     def _on_grid_changed(self, checked):
         self.prefs.set('plot', 'show_grid', checked)
+        self.prefs.save()
+        self._refresh_current_graph()
+
+    def _on_epoch_display_mode_changed(self, mode):
+        """Handle epoch display mode change — save pref and refresh."""
+        self.prefs.set('plot', 'epoch_display_mode', mode)
+        self.prefs.save()
+        self._refresh_current_graph()
+
+    def _on_ml_epoch_toggled(self, epoch, checked):
+        """Handle ML epoch toggle — save and refresh graph."""
+        self.prefs.set('plot', f'ml_epoch_{epoch}_enabled', checked)
+        self.prefs.save()
         self._refresh_current_graph()
 
     def _refresh_current_graph(self):
@@ -1685,6 +1868,7 @@ class PlotVisualWindow(QMainWindow):
             return
         dispatch = {
             'velocity': self._plot_velocity_vs_intensity,
+            'ml_epochs': self._plot_ml_epoch_progression,
             'heatmap': self._plot_success_heatmap,
             'accuracy': self._plot_landing_accuracy,
             'topdown': self._plot_landing_topdown,
@@ -1802,6 +1986,163 @@ class PlotVisualWindow(QMainWindow):
         fig.tight_layout()
         self._embed_figure(fig)
         self.status_bar.showMessage(f'Showing: Landing Velocity vs Fault Intensity ({params["yscale"]} scale)')
+
+    def _plot_ml_epoch_progression(self):
+        """Plot ML landing-velocity vs fault intensity across training epochs.
+
+        Overlays the Optimisation baseline with ML snapshots at epochs
+        1, 100, 500, 1200 and 2000 so the user can see how model accuracy
+        improves during training (8 layers, 14 337 params, 2000 epochs).
+        """
+        epoch_df = self.data_store.get('ml_epochs')
+        if epoch_df is None or len(epoch_df) == 0:
+            QMessageBox.warning(
+                self, 'No Epoch Data',
+                'ML epoch progression data not found.\n'
+                'Click  \U0001F4C2 Load Sample Data  on the Home page first.'
+            )
+            return
+
+        self.last_view = 'ml_epochs'
+        params = self._get_plot_params()
+        style = get_matplotlib_style(self._theme_mode)
+
+        fig = Figure(figsize=(12, 7), dpi=100)
+        fig.set_facecolor(style.get('figure.facecolor', '#1a1a20'))
+        ax = fig.add_subplot(111)
+
+        with plt.style.context(style):
+            ax.set_facecolor(style.get('axes.facecolor', '#22222a'))
+
+            # Colour / label map -------------------------------------------
+            # Optimisation baseline gets the same blue as the main graph.
+            # Each epoch snapshot gets a distinct colour progressing from
+            # red (horrid) through amber/yellow to green (final).
+            epoch_meta = {
+                0:    {'color': '#3498db', 'label': 'Optimization (baseline)', 'zorder': 2, 'marker': 'o'},
+                1:    {'color': '#e74c3c', 'label': 'Epoch 1',     'zorder': 3, 'marker': 's'},
+                100:  {'color': '#e67e22', 'label': 'Epoch 100',       'zorder': 4, 'marker': 'D'},
+                500:  {'color': '#f1c40f', 'label': 'Epoch 500', 'zorder': 5, 'marker': '^'},
+                1200: {'color': '#1abc9c', 'label': 'Epoch 1200',   'zorder': 6, 'marker': 'v'},
+                2000: {'color': '#2ecc71', 'label': 'Epoch 2000 (final)',      'zorder': 7, 'marker': 'o'},
+            }
+
+            # Determine which epochs are enabled via toggles
+            enabled_epochs = set()
+            enabled_epochs.add(0)  # Optimization baseline always shown
+            for epoch in [1, 100, 500, 1200, 2000]:
+                if self._ml_epoch_cbs[epoch].isChecked():
+                    enabled_epochs.add(epoch)
+
+            # Determine display mode: scatter data points or line of best fit
+            display_mode = self._epoch_display_mode.currentText()
+            use_line_fit = (display_mode == 'Line of Best Fit')
+
+            # Plot baseline (Optimisation) first, then each epoch in order
+            plot_order = [0, 1, 100, 500, 1200, 2000]
+            for epoch in plot_order:
+                if epoch not in enabled_epochs:
+                    continue
+                meta = epoch_meta[epoch]
+                if epoch == 0:
+                    subset = epoch_df[(epoch_df['Epoch'] == 0) & (epoch_df['Type'] == 'Optimization')]
+                else:
+                    subset = epoch_df[(epoch_df['Epoch'] == epoch) & (epoch_df['Type'] == 'ML')]
+                if subset.empty:
+                    continue
+
+                if use_line_fit:
+                    # Compute polynomial line of best fit (degree 4 for good shape fidelity)
+                    x_raw = subset['Total Fault Intensity'].values
+                    y_raw = subset['Landing Velocity'].values
+                    sort_idx = np.argsort(x_raw)
+                    x_sorted = x_raw[sort_idx]
+                    y_sorted = y_raw[sort_idx]
+                    # Use degree-4 poly; clamp to >= 0.1 for sanity
+                    poly_degree = min(4, max(1, len(x_sorted) - 1))
+                    coeffs = np.polyfit(x_sorted, y_sorted, poly_degree)
+                    x_smooth = np.linspace(x_sorted.min(), x_sorted.max(), 300)
+                    y_smooth = np.clip(np.polyval(coeffs, x_smooth), 0.1, None)
+                    ax.plot(
+                        x_smooth, y_smooth,
+                        color=meta['color'],
+                        linewidth=2.5,
+                        alpha=min(1.0, params['alpha'] + 0.2),
+                        label=meta['label'],
+                        zorder=meta['zorder'],
+                    )
+                else:
+                    ax.scatter(
+                        subset['Total Fault Intensity'],
+                        subset['Landing Velocity'],
+                        c=meta['color'],
+                        s=params['marker_size'],
+                        alpha=params['alpha'],
+                        label=meta['label'],
+                        edgecolors='black',
+                        linewidth=0.5,
+                        marker=meta['marker'],
+                        zorder=meta['zorder'],
+                    )
+
+            # Axes labels & title
+            ax.set_xlabel('Total Fault Intensity', fontsize=12, fontweight='bold',
+                          color=style.get('axes.labelcolor', '#c0c0c8'))
+            ax.set_ylabel('Landing Velocity (m/s)', fontsize=12, fontweight='bold',
+                          color=style.get('axes.labelcolor', '#c0c0c8'))
+            ax.set_title(
+                'ML Accuracy Progression Over Training Epochs',
+                fontsize=14, fontweight='bold',
+                color=style.get('text.color', '#e0e0e0'),
+            )
+
+            # Y-scale (log / linear) — mirrors velocity-vs-intensity logic
+            all_vel = epoch_df['Landing Velocity']
+            if params['yscale'] == 'Log':
+                ax.set_yscale('log')
+                ax.yaxis.set_major_locator(LogLocator(base=10.0, numticks=15))
+                ax.yaxis.set_minor_locator(LogLocator(base=10.0, subs=np.arange(2, 10) * 0.1, numticks=100))
+                ax.yaxis.set_minor_formatter(NullFormatter())
+                y_min = max(0.1, all_vel.min() * 0.5)
+                y_max = all_vel.max() * 2.0
+                ax.set_ylim(y_min, y_max)
+            else:
+                ax.set_yscale('linear')
+                y_max = max(5.0, all_vel.max() * 1.1)
+                ax.set_ylim(0, y_max)
+                if y_max > 50:
+                    ax.yaxis.set_major_locator(MultipleLocator(10))
+                elif y_max > 20:
+                    ax.yaxis.set_major_locator(MultipleLocator(5))
+                else:
+                    ax.yaxis.set_major_locator(MultipleLocator(2))
+
+            # Grid
+            if params['show_grid']:
+                ax.grid(True, alpha=0.3, linestyle='--', which='both',
+                        color=style.get('grid.color', '#2e2e36'))
+
+            # Success threshold line
+            ax.axhline(y=2, color='red', linestyle='--', linewidth=2, alpha=0.8,
+                        label='Success Threshold (2 m/s)')
+
+            # Legend
+            ax.legend(
+                fontsize=10, frameon=True, shadow=True, ncol=2, loc='upper left',
+                facecolor=style.get('legend.facecolor', '#22222a'),
+                edgecolor=style.get('legend.edgecolor', '#3a3a42'),
+                labelcolor=style.get('legend.labelcolor', '#e0e0e0'),
+            )
+            ax.tick_params(colors=style.get('xtick.color', '#808088'))
+
+        fig.tight_layout()
+        self._embed_figure(fig)
+        enabled_count = sum(1 for e in [1, 100, 500, 1200, 2000] if self._ml_epoch_cbs[e].isChecked())
+        display_mode = self._epoch_display_mode.currentText()
+        self.status_bar.showMessage(
+            f'Showing: ML Epoch Progression ({params["yscale"]} scale, {display_mode}) – '
+            f'{enabled_count} epoch snapshot(s) enabled'
+        )
 
     def _plot_success_heatmap(self):
         if not self._check_data(['Success']):
@@ -1945,8 +2286,8 @@ class PlotVisualWindow(QMainWindow):
         ax = fig.add_subplot(111)
         ax.set_facecolor(style.get('axes.facecolor', '#22222a'))
 
-        target = plt.Circle((0, 0), 2, color='red', fill=False, linewidth=3,
-                             label='Target (2m radius)', zorder=10)
+        target = plt.Circle((0, 0), 15, color='red', fill=False, linewidth=3,
+                             label='Target (15m radius)', zorder=10)
         ax.add_patch(target)
 
         types = self.filtered_data['Type'].unique() if 'Type' in self.filtered_data.columns else ['All']
