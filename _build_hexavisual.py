@@ -1,12 +1,41 @@
 """
-Build script for HexaVisual Pro (Demo) - assembles the complete HTML file
-with embedded trajectory data from _traj_data_js.txt
+Build script for the standalone flight data viewer with embedded trajectory data.
 """
 import os
+import csv
 
 # Read trajectory data block
 with open('_traj_data_js.txt', 'r') as f:
     traj_data_block = f.read()
+
+# Read secondary body (payload satellite) altitude data from CSV
+secondary_body_js = ''
+csv_path = os.path.join(os.path.expanduser('~'), 'Downloads', 'Altitude_Raw_Data.csv')
+if os.path.exists(csv_path):
+    sec_points = []
+    sep_time = 5.8
+    with open(csv_path, 'r') as cf:
+        reader = csv.DictReader(cf)
+        for row in reader:
+            t = float(row['time_s'])
+            sec_alt_str = row['Flight 1_secondary_Altitude'].strip()
+            if sec_alt_str == '' or t < sep_time:
+                continue
+            alt = float(sec_alt_str)
+            # Synthetic X/Y: drift downwind at 0.5 m/s from separation point
+            dt = t - sep_time
+            x = round(dt * 0.5, 2)   # downwind drift in sim X
+            y = 0.0                   # no lateral drift in sim Y
+            sec_points.append(f'[{t},{x},{y},{alt}]')
+    if sec_points:
+        secondary_body_js = 'const SECONDARY_BODY = [\n' + ',\n'.join(sec_points) + '\n];\nconst SEC_SEPARATION_TIME = ' + str(sep_time) + ';\n'
+        print(f'  Secondary body data: {len(sec_points)} points from t={sep_time}s')
+    else:
+        secondary_body_js = '// No secondary body data found\n'
+        print('  Warning: CSV found but no secondary body data extracted')
+else:
+    secondary_body_js = '// Secondary body CSV not found — skipping\n'
+    print(f'  Warning: Secondary body CSV not found at {csv_path}')
 
 # Build the HTML
 html = r'''<!DOCTYPE html>
@@ -14,61 +43,61 @@ html = r'''<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>HexaVisual Pro (Demo) — Vortex Flight Visualizer</title>
+<title>Flight Data Viewer</title>
 <style>
 /* ═══════════════════════════════════════════════════════════════
-   CSS — HexaVisual Pro (Demo) — Glassmorphism + Dark Theme
+   CSS — Plain technical viewer
    ═══════════════════════════════════════════════════════════════ */
 *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
 :root{
-  --glass-bg:rgba(15,15,25,0.72);
+  --glass-bg:rgba(22,24,28,0.96);
   --glass-border:rgba(255,255,255,0.08);
-  --glass-blur:16px;
-  --accent:#00d4ff;
-  --accent2:#7c3aed;
-  --success:#4CAF50;
-  --warning:#FF9800;
-  --danger:#F44336;
-  --text:#e8e8f0;
-  --text-dim:#8888aa;
+  --glass-blur:0px;
+  --accent:#6ea0d8;
+  --accent2:#6ea0d8;
+  --success:#6a9d74;
+  --warning:#b78a55;
+  --danger:#b66a6a;
+  --text:#d7dce3;
+  --text-dim:#96a0ad;
   --mono:'Consolas','SF Mono','Fira Code',monospace;
-  --sans:'Segoe UI','Inter',system-ui,sans-serif;
+  --sans:'Segoe UI',system-ui,sans-serif;
   --sidebar-w:300px;
   --hud-w:280px;
   --control-h:64px;
-  --body-bg:#000;
-  --card-bg:rgba(255,255,255,0.03);
-  --card-border:rgba(255,255,255,0.06);
-  --card-hover-bg:rgba(255,255,255,0.07);
-  --card-hover-border:rgba(255,255,255,0.12);
-  --speed-option-bg:#1a1a2e;
-  --select-bg:rgba(255,255,255,0.08);
-  --select-border:rgba(255,255,255,0.1);
-  --range-bg:rgba(255,255,255,0.12);
-  --toggle-off-bg:rgba(255,255,255,0.12);
-  --scrollbar-thumb:rgba(255,255,255,0.15);
-  --loading-bg:#0a0a14;
-  --upload-border:rgba(255,255,255,0.15);
-  --divider:rgba(255,255,255,0.06);
+  --body-bg:#111317;
+  --card-bg:#171a1f;
+  --card-border:rgba(255,255,255,0.08);
+  --card-hover-bg:#1c2027;
+  --card-hover-border:rgba(255,255,255,0.14);
+  --speed-option-bg:#1a1d22;
+  --select-bg:#1b1f26;
+  --select-border:rgba(255,255,255,0.12);
+  --range-bg:rgba(255,255,255,0.10);
+  --toggle-off-bg:rgba(255,255,255,0.10);
+  --scrollbar-thumb:rgba(255,255,255,0.18);
+  --loading-bg:#111317;
+  --upload-border:rgba(255,255,255,0.12);
+  --divider:rgba(255,255,255,0.08);
 }
 /* ── Light theme ── */
 body.light{
-  --glass-bg:rgba(240,243,255,0.85);
+  --glass-bg:rgba(244,246,248,0.97);
   --glass-border:rgba(0,0,0,0.08);
-  --text:#1a1a2e;
-  --text-dim:#5566aa;
-  --body-bg:#d0d8f0;
-  --card-bg:rgba(0,0,0,0.03);
+  --text:#1d232b;
+  --text-dim:#5f6976;
+  --body-bg:#d9dde2;
+  --card-bg:#eef1f4;
   --card-border:rgba(0,0,0,0.08);
-  --card-hover-bg:rgba(0,0,0,0.06);
+  --card-hover-bg:#e5e9ee;
   --card-hover-border:rgba(0,0,0,0.14);
-  --speed-option-bg:#e8ecff;
-  --select-bg:rgba(0,0,0,0.07);
+  --speed-option-bg:#eef1f4;
+  --select-bg:#e7ebf0;
   --select-border:rgba(0,0,0,0.12);
   --range-bg:rgba(0,0,0,0.12);
   --toggle-off-bg:rgba(0,0,0,0.12);
   --scrollbar-thumb:rgba(0,0,0,0.18);
-  --loading-bg:#d8dff7;
+  --loading-bg:#d9dde2;
   --upload-border:rgba(0,0,0,0.15);
   --divider:rgba(0,0,0,0.07);
 }
@@ -81,54 +110,94 @@ canvas{display:block;position:absolute;top:0;left:0;z-index:0}
   backdrop-filter:blur(var(--glass-blur));
   -webkit-backdrop-filter:blur(var(--glass-blur));
   border:1px solid var(--glass-border);
-  border-radius:12px;
+  border-radius:6px;
 }
 
 /* ──── SIDEBAR (left) ──── */
 #sidebar{
   position:fixed;top:0;left:0;width:var(--sidebar-w);height:100vh;
   z-index:100;padding:16px 12px;overflow-y:auto;overflow-x:hidden;
-  border-radius:0 12px 12px 0;
+  border-radius:0;
   scrollbar-width:thin;scrollbar-color:var(--scrollbar-thumb) transparent;
 }
+#sidebar-toggle{
+  position:absolute;top:12px;right:12px;width:28px;height:28px;border-radius:8px;
+  background:var(--select-bg);border:1px solid var(--select-border);color:var(--text);
+  cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;
+}
+#sidebar-toggle:hover{background:var(--card-hover-bg);border-color:var(--card-hover-border)}
 #sidebar::-webkit-scrollbar{width:5px}
 #sidebar::-webkit-scrollbar-thumb{background:var(--scrollbar-thumb);border-radius:3px}
-#sidebar h1{font-size:18px;font-weight:700;letter-spacing:0.5px;margin-bottom:4px;
-  background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-#sidebar .subtitle{font-size:11px;color:var(--text-dim);margin-bottom:16px}
+#sidebar .section-title{font-size:11px;font-weight:700;letter-spacing:1px;margin-bottom:12px;text-transform:uppercase;color:var(--text-dim)}
+body.sidebar-collapsed{--sidebar-w:58px}
+body.sidebar-collapsed #sidebar{padding:12px 8px}
+body.sidebar-collapsed #sidebar .section-title{font-size:10px;letter-spacing:1.2px;margin-top:34px;margin-bottom:0;writing-mode:vertical-rl;transform:rotate(180deg)}
+body.sidebar-collapsed #demo-cards,
+body.sidebar-collapsed .upload-btn{display:none}
+body.sidebar-collapsed #sidebar-toggle{right:50%;transform:translateX(50%)}
 
 /* Demo cards */
 .demo-card{
-  padding:10px 12px;margin-bottom:8px;cursor:pointer;
-  border-radius:10px;border:1px solid var(--card-border);
-  background:var(--card-bg);transition:all 0.2s;position:relative;overflow:hidden;
+  padding:9px 10px;margin-bottom:6px;cursor:pointer;
+  border-radius:4px;border:1px solid var(--card-border);
+  background:var(--card-bg);transition:border-color 0.15s, background 0.15s;
 }
-.demo-card:hover{background:var(--card-hover-bg);border-color:var(--card-hover-border);transform:translateX(3px)}
-.demo-card.active{border-color:var(--accent);background:rgba(0,212,255,0.08);box-shadow:0 0 20px rgba(0,212,255,0.1)}
-.demo-card .card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
-.demo-card .card-title{font-size:13px;font-weight:600}
-.demo-card .badge{font-size:9px;padding:2px 7px;border-radius:4px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase}
-.badge-opt{background:rgba(124,58,237,0.25);color:#b794f6}
-.badge-ml{background:rgba(0,212,255,0.2);color:#0090bb}
-body.light .badge-ml{color:#0070a0}
-.badge-success{background:rgba(76,175,80,0.2);color:#2e7d32}
-.badge-fail{background:rgba(255,152,0,0.2);color:#e65100}
-.badge-crash{background:rgba(244,67,54,0.2);color:#b71c1c}
-.demo-card .card-stats{display:grid;grid-template-columns:1fr 1fr;gap:2px 12px;font-size:10px;color:var(--text-dim)}
-.demo-card .card-stats span{font-family:var(--mono)}
-.demo-card .fault-bar{height:3px;border-radius:2px;background:var(--range-bg);margin-top:6px;overflow:hidden}
-.demo-card .fault-bar-fill{height:100%;border-radius:2px;transition:width 0.5s}
+.demo-card:hover{background:var(--card-hover-bg);border-color:var(--card-hover-border);transform:none}
+.demo-card.active{border-color:var(--accent);background:var(--card-hover-bg);box-shadow:none}
+.demo-card .card-header{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.demo-card .card-title{font-size:12px;font-weight:600}
+.demo-card .badge{font-size:9px;padding:2px 6px;border-radius:3px;font-weight:700;letter-spacing:0.4px;text-transform:uppercase}
+.badge-opt{background:rgba(255,255,255,0.06);color:var(--text-dim)}
+.badge-ml{background:rgba(110,160,216,0.18);color:var(--accent)}
+body.light .badge-ml{color:#446c99}
+.badge-success{background:rgba(106,157,116,0.18);color:var(--success)}
+.badge-fail{background:rgba(183,138,85,0.18);color:var(--warning)}
+.badge-crash{background:rgba(182,106,106,0.18);color:var(--danger)}
 
 /* ──── HUD (top-left, offset from sidebar) ──── */
 #hud{
   position:fixed;top:16px;left:calc(var(--sidebar-w) + 16px);
   width:var(--hud-w);z-index:90;padding:14px 16px;
 }
+#hud.minimized{width:200px}
 #hud h2{font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-dim);margin-bottom:10px;font-weight:600}
 .hud-row{display:flex;justify-content:space-between;align-items:center;padding:3px 0;font-size:12px}
 .hud-row .label{color:var(--text-dim);font-size:10px;text-transform:uppercase;letter-spacing:0.5px}
 .hud-row .value{font-family:var(--mono);font-weight:600;font-size:13px}
+.hud-section-title{
+  margin:8px 0 6px;color:var(--text-dim);font-size:10px;font-weight:700;
+  letter-spacing:1px;text-transform:uppercase;
+}
+.variables-grid{
+  display:grid;grid-template-columns:minmax(82px,1fr) minmax(88px,1fr) minmax(88px,1fr);
+  gap:4px 10px;font-size:11px;align-items:center;
+}
+.variables-grid .head{
+  color:var(--text-dim);font-size:10px;text-transform:uppercase;letter-spacing:0.7px;
+}
+.variables-grid .label{
+  color:var(--text-dim);font-size:10px;text-transform:uppercase;letter-spacing:0.5px;
+}
+.variables-grid .value{font-family:var(--mono);font-weight:600;font-size:12px}
+.config-grid{
+  display:grid;grid-template-columns:minmax(96px,1fr) minmax(110px,1fr);
+  gap:4px 12px;font-size:11px;align-items:center;
+}
+.config-grid .label{
+  color:var(--text-dim);font-size:10px;text-transform:uppercase;letter-spacing:0.5px;
+}
+.config-grid .value{font-family:var(--mono);font-weight:600;font-size:12px;text-align:right}
 .hud-divider{height:1px;background:var(--divider);margin:6px 0}
+.panel-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.panel-head h2{margin:0 !important}
+.panel-toggle{
+  width:24px;height:24px;border-radius:6px;background:var(--select-bg);border:1px solid var(--select-border);
+  color:var(--text);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;
+}
+.panel-toggle:hover{background:var(--card-hover-bg);border-color:var(--card-hover-border)}
+.panel-body{overflow:hidden}
+#hud.minimized .panel-body,
+#ml-overlay.minimized .panel-body{display:none}
 #engine-status{
   display:inline-block;padding:2px 10px;border-radius:4px;font-size:10px;font-weight:700;
   letter-spacing:1px;text-transform:uppercase;margin-top:4px;
@@ -138,15 +207,15 @@ body.light .badge-ml{color:#0070a0}
 #ml-overlay{
   position:fixed;top:16px;right:16px;width:260px;z-index:90;padding:14px 16px;
 }
+#ml-overlay.minimized{width:200px}
 #ml-overlay h2{font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-dim);margin-bottom:10px;font-weight:600}
 .ml-row{display:flex;justify-content:space-between;padding:3px 0;font-size:11px}
 .ml-row .label{color:var(--text-dim)}
 .ml-row .value{font-family:var(--mono);font-weight:600}
-.ml-meter{height:6px;border-radius:3px;background:var(--range-bg);margin:4px 0;overflow:hidden}
-.ml-meter-fill{height:100%;border-radius:3px;transition:width 0.3s}
 
 /* ──── FAULT TOAST NOTIFICATION ──── */
 #fault-toast{
+  display:none !important;
   position:fixed;top:80px;left:50%;transform:translateX(-50%) translateY(-20px);
   z-index:200;padding:10px 24px;border-radius:10px;
   background:rgba(244,67,54,0.18);border:1px solid rgba(244,67,54,0.4);
@@ -175,7 +244,24 @@ body.light .badge-ml{color:#0070a0}
 }
 #controls-bar button:hover{background:var(--card-hover-bg);border-color:var(--card-hover-border)}
 #controls-bar button.primary{background:rgba(0,212,255,0.15);border-color:rgba(0,212,255,0.3);min-width:44px;min-height:36px;font-size:16px}
+#controls-bar button.loop-active{background:rgba(76,175,80,0.18);border-color:rgba(76,175,80,0.45);color:var(--success)}
 #timeline-container{flex:1;display:flex;align-items:center;gap:10px}
+#timeline-wrap{position:relative;flex:1;display:flex;align-items:center}
+#timeline-markers{
+  position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);
+  height:18px;pointer-events:none;
+}
+.timeline-marker{position:absolute;top:50%;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:2px}
+.timeline-marker::before{
+  content:'';width:8px;height:8px;border-radius:50%;background:var(--accent);
+  box-shadow:0 0 8px rgba(0,212,255,0.35);border:1px solid rgba(255,255,255,0.45);
+}
+.timeline-marker.touchdown::before{background:var(--success);box-shadow:0 0 8px rgba(76,175,80,0.35)}
+.timeline-marker.failure::before{background:var(--danger);box-shadow:0 0 8px rgba(244,67,54,0.35)}
+.timeline-marker span{
+  transform:translateY(-12px);font-size:9px;letter-spacing:0.5px;text-transform:uppercase;
+  color:var(--text-dim);font-family:var(--mono);white-space:nowrap;
+}
 #timeline{
   -webkit-appearance:none;appearance:none;width:100%;height:4px;border-radius:2px;
   background:var(--range-bg);outline:none;cursor:pointer;
@@ -252,6 +338,25 @@ body.light .badge-ml{color:#0070a0}
   color:var(--accent);border-radius:20px;
 }
 
+/* ──── ML CORRECTION BAR ──── */
+#correction-bar{
+  position:fixed;top:50px;left:50%;transform:translateX(-50%);z-index:90;width:420px;
+  padding:10px 14px;border-radius:14px;
+}
+#correction-bar.hidden{display:none}
+.corr-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.corr-head .title{font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--text-dim);font-weight:700}
+.corr-head .value{font-family:var(--mono);font-size:13px;font-weight:700}
+.corr-track{
+  position:relative;height:12px;border-radius:999px;background:linear-gradient(90deg,rgba(255,152,0,0.18),rgba(255,255,255,0.07),rgba(0,212,255,0.18));
+  overflow:hidden;
+}
+.corr-center{position:absolute;left:50%;top:0;bottom:0;width:2px;background:rgba(255,255,255,0.55);transform:translateX(-50%)}
+.corr-fill{
+  position:absolute;top:1px;bottom:1px;border-radius:999px;transition:left 0.2s ease,width 0.2s ease,background 0.2s ease;
+}
+.corr-scale{display:flex;justify-content:space-between;margin-top:6px;color:var(--text-dim);font-size:10px;font-family:var(--mono)}
+
 /* ──── Upload zone ──── */
 .upload-btn{
   display:block;width:100%;padding:8px;text-align:center;border-radius:8px;
@@ -272,8 +377,7 @@ body.light .badge-ml{color:#0070a0}
   transition:opacity 0.5s;
 }
 #loading.hidden{opacity:0;pointer-events:none}
-#loading h1{font-size:28px;font-weight:700;margin-bottom:8px;
-  background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+#loading h1{font-size:22px;font-weight:700;margin-bottom:8px;color:var(--text)}
 #loading p{color:var(--text-dim);font-size:13px}
 .loader{width:40px;height:40px;border:3px solid var(--range-bg);border-top-color:var(--accent);border-radius:50%;animation:spin 0.8s linear infinite;margin-top:20px}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -283,15 +387,15 @@ body.light .badge-ml{color:#0070a0}
 
 <!-- Loading screen -->
 <div id="loading">
-  <h1>HexaVisual Pro</h1>
-  <p>Initializing 3D Engine...</p>
+  <h1>Flight Data Viewer</h1>
+  <p>Loading trajectory data...</p>
   <div class="loader"></div>
 </div>
 
 <!-- Sidebar -->
 <div id="sidebar" class="glass">
-  <h1>HexaVisual Pro</h1>
-  <div class="subtitle">Vortex Flight Visualizer — Demo</div>
+  <button id="sidebar-toggle" onclick="toggleSidebar()" title="Collapse sidebar">&#9664;</button>
+  <div class="section-title">Runs</div>
   <div id="demo-cards"></div>
   <label class="upload-btn" title="Upload custom trajectory CSV">
     &#128194; Upload CSV Trajectory
@@ -305,25 +409,58 @@ body.light .badge-ml{color:#0070a0}
 
 <!-- HUD -->
 <div id="hud" class="glass">
-  <h2>Flight Telemetry</h2>
+  <div class="panel-head">
+    <h2>Variables</h2>
+    <button id="hud-toggle" class="panel-toggle" onclick="toggleHud()" title="Minimize variables">&#8722;</button>
+  </div>
+  <div class="panel-body">
   <div class="hud-row"><span class="label">Time</span><span class="value" id="h-time">0.000s</span></div>
-  <div class="hud-row"><span class="label">Altitude</span><span class="value" id="h-alt">0.00 m</span></div>
-  <div class="hud-row"><span class="label">Vert. Vel</span><span class="value" id="h-vvel">0.00 m/s</span></div>
-  <div class="hud-row"><span class="label">Horiz. Vel</span><span class="value" id="h-hvel">0.00 m/s</span></div>
-  <div class="hud-row"><span class="label">Speed</span><span class="value" id="h-speed">0.00 m/s</span></div>
+  <div class="hud-row"><span class="label">Flight Phase</span><span class="value" id="h-phase">Pad Idle</span></div>
   <div class="hud-divider"></div>
-  <div class="hud-row"><span class="label">Mass</span><span class="value" id="h-mass">1.282 kg</span></div>
-  <div class="hud-row"><span class="label">TTI</span><span class="value" id="h-tti">—</span></div>
+  <div class="hud-section-title">Actual vs Measured</div>
+  <div class="variables-grid">
+    <div class="head"></div><div class="head">Actual</div><div class="head">Measured</div>
+    <div class="label">Altitude</div><div class="value" id="h-alt-actual">0.00 m</div><div class="value" id="h-alt-measured">0.00 m</div>
+    <div class="label">Vert. Vel</div><div class="value" id="h-vvel-actual">0.00 m/s</div><div class="value" id="h-vvel-measured">0.00 m/s</div>
+    <div class="label">Horiz. Vel</div><div class="value" id="h-hvel-actual">0.00 m/s</div><div class="value" id="h-hvel-measured">0.00 m/s</div>
+    <div class="label">Speed</div><div class="value" id="h-speed-actual">0.00 m/s</div><div class="value" id="h-speed-measured">0.00 m/s</div>
+    <div class="label">Mass</div><div class="value" id="h-mass-actual">1.282 kg</div><div class="value" id="h-mass-measured">1.282 kg</div>
+    <div class="label">Wind</div><div class="value" id="h-wind-actual">0.00 m/s</div><div class="value" id="h-wind-measured">0.00 m/s</div>
+    <div class="label">TTI</div><div class="value" id="h-tti-actual">—</div><div class="value" id="h-tti-measured">—</div>
+  </div>
+  <div class="hud-divider"></div>
+  <div class="hud-section-title">Estimator</div>
+  <div class="config-grid">
+    <div class="label">EKF Mass</div><div class="value" id="h-ekf-mass">— kg</div>
+    <div class="label">EKF Drag Cd</div><div class="value" id="h-ekf-cd">—</div>
+  </div>
+  <div class="hud-divider"></div>
+  <div class="hud-section-title">Configuration</div>
+  <div class="config-grid">
+    <div class="label">Mode</div><div class="value" id="cfg-mode">—</div>
+    <div class="label">Nominal Ign.</div><div class="value" id="cfg-ign-nom">— m</div>
+    <div class="label">Effective Ign.</div><div class="value" id="cfg-ign-eff">— m</div>
+    <div class="label">Dry Mass</div><div class="value" id="cfg-dry-mass">— kg</div>
+    <div class="label">Propellant</div><div class="value" id="cfg-prop-mass">— kg</div>
+    <div class="label">Thrust Avg</div><div class="value" id="cfg-thrust">— N</div>
+    <div class="label">Drag Cd</div><div class="value" id="cfg-cd">—</div>
+    <div class="label">Air Density</div><div class="value" id="cfg-rho">— kg/m3</div>
+    <div class="label">Wind</div><div class="value" id="cfg-wind">— m/s</div>
+  </div>
+  <div class="hud-divider"></div>
   <div id="engine-status" style="background:rgba(255,255,255,0.08);color:var(--text-dim)">IDLE</div>
+  </div>
 </div>
 
 <!-- ML Overlay -->
 <div id="ml-overlay" class="glass" style="display:none">
-  <h2>ML Flight Computer</h2>
+  <div class="panel-head">
+    <h2>ML Flight Computer</h2>
+    <button id="ml-toggle" class="panel-toggle" onclick="toggleMlOverlay()" title="Minimize ML overlay">&#8722;</button>
+  </div>
+  <div class="panel-body">
   <div class="ml-row"><span class="label">Mode</span><span class="value" id="ml-mode">—</span></div>
   <div class="ml-row"><span class="label">Faults</span><span class="value" id="ml-faults">None</span></div>
-  <div class="ml-row"><span class="label">Fault Intensity</span><span class="value" id="ml-intensity">0.00</span></div>
-  <div class="ml-meter"><div class="ml-meter-fill" id="ml-intensity-bar" style="width:0%;background:var(--success)"></div></div>
   <div class="hud-divider"></div>
   <div class="ml-row"><span class="label">Baseline Ign. Alt.</span><span class="value" id="ml-base-ign">— m</span></div>
   <div class="ml-row"><span class="label">ML Ign. Correction</span><span class="value" id="ml-ign-corr">— m</span></div>
@@ -331,6 +468,7 @@ body.light .badge-ml{color:#0070a0}
   <div class="hud-divider"></div>
   <div class="ml-row"><span class="label">Landing Vel.</span><span class="value" id="ml-lvel">— m/s</span></div>
   <div class="ml-row"><span class="label">Landing Dist.</span><span class="value" id="ml-ldist">— m</span></div>
+  </div>
 </div>
 
 <!-- Fault Toast Notification -->
@@ -338,6 +476,19 @@ body.light .badge-ml{color:#0070a0}
 
 <!-- Camera mode indicator -->
 <div id="camera-mode" class="glass">Chase Cam</div>
+
+<!-- ML correction bar -->
+<div id="correction-bar" class="glass hidden">
+  <div class="corr-head">
+    <span class="title">ML Ignition Correction</span>
+    <span class="value" id="corr-value">+0.00 m</span>
+  </div>
+  <div class="corr-track">
+    <div class="corr-center"></div>
+    <div class="corr-fill" id="corr-fill"></div>
+  </div>
+  <div class="corr-scale"><span>-6.0 m</span><span>0.0 m</span><span>+8.0 m</span></div>
+</div>
 
 <!-- FPS counter -->
 <div id="fps-counter" class="glass">— FPS</div>
@@ -347,10 +498,14 @@ body.light .badge-ml{color:#0070a0}
   <button title="Skip back 5s" onclick="skipTime(-5)">&#9194;</button>
   <button title="Step back" onclick="stepFrame(-1)">&#9198;</button>
   <button class="primary" id="play-btn" onclick="togglePlay()" title="Play / Pause">&#9654;</button>
+  <button id="loop-btn" onclick="toggleLoop()" title="Simulation loop off">Loop</button>
   <button title="Step forward" onclick="stepFrame(1)">&#9197;</button>
   <button title="Skip forward 5s" onclick="skipTime(5)">&#9193;</button>
   <div id="timeline-container">
-    <input type="range" id="timeline" min="0" max="1000" value="0" step="1">
+    <div id="timeline-wrap">
+      <div id="timeline-markers"></div>
+      <input type="range" id="timeline" min="0" max="1000" value="0" step="1">
+    </div>
   </div>
   <div class="time-display" id="time-display">0.00 / 0.00</div>
   <div id="speed-input-wrap">
@@ -421,11 +576,11 @@ body.light .badge-ml{color:#0070a0}
         <div style="flex:0 0 52px">
           <div style="font-size:10px;color:var(--muted);margin-bottom:2px">Zoom</div>
           <select id="sat-zoom" style="width:100%;background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:3px 4px;font-size:11px">
-            <option value="12">12</option><option value="13">13</option><option value="14" selected>14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option>
+            <option value="14">14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18" selected>18</option><option value="19">19</option>
           </select>
         </div>
       </div>
-      <button onclick="loadSatTile()" style="width:100%;padding:5px;background:var(--accent);color:#000;border:none;border-radius:4px;cursor:pointer;font-size:11px;font-weight:600;margin-bottom:8px">Load Tile</button>
+      <button onclick="loadSatTile()" style="width:100%;padding:5px;background:var(--accent);color:#000;border:none;border-radius:4px;cursor:pointer;font-size:11px;font-weight:600;margin-bottom:8px">Load Imagery</button>
       <div style="display:flex;align-items:center;gap:6px">
         <span style="font-size:10px;color:var(--muted);white-space:nowrap">Brightness</span>
         <input type="range" id="sat-brightness" min="0.2" max="2.5" value="1.0" step="0.05" style="flex:1;accent-color:var(--accent)" oninput="updateSatBrightness(parseFloat(this.value))">
@@ -469,7 +624,7 @@ body.light .badge-ml{color:#0070a0}
 // ═══════════════════════════════════════════════════════════════
 // DATA — Embedded trajectory + manifest
 // ═══════════════════════════════════════════════════════════════
-''' + '\n' + traj_data_block + '\n' + r'''
+''' + '\n' + traj_data_block + '\n' + secondary_body_js + '\n' + r'''
 const COLS = {T:0,X:1,Y:2,Z:3,VX:4,VY:5,VZ:6,QW:7,QX:8,QY:9,QZ:10,M:11,MLC:12,FT:13,FM:14,WX:15,WY:16,PH:17};
 
 // ═══════════════════════════════════════════════════════════════
@@ -489,10 +644,13 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 // ═══════════════════════════════════════════════════════════════
 const state = {
   playing: false,
+  loopPlayback: false,
+  loopRestartRemaining: 0,
   currentTime: 0,
   speed: 1,
   currentRun: null,
   currentTrajectory: null,
+  currentEvents: [],
   cameraMode: 'chase', // chase | orbit | free
   lateralScale: 1,
   verticalScale: 1,
@@ -501,10 +659,195 @@ const state = {
   soundEnabled: false,
   satelliteEnabled: false,
   lightMode: false,
+  sidebarCollapsed: false,
+  hudMinimized: false,
+  mlMinimized: false,
 };
 
 // Expose state for inline HTML event handlers (onchange="state.xxx=...")
 window.state = state;
+
+function applyChromeState() {
+  document.body.classList.toggle('sidebar-collapsed', state.sidebarCollapsed);
+  document.getElementById('hud').classList.toggle('minimized', state.hudMinimized);
+  document.getElementById('ml-overlay').classList.toggle('minimized', state.mlMinimized);
+  document.getElementById('sidebar-toggle').innerHTML = state.sidebarCollapsed ? '&#9654;' : '&#9664;';
+  document.getElementById('hud-toggle').innerHTML = state.hudMinimized ? '&#43;' : '&#8722;';
+  document.getElementById('ml-toggle').innerHTML = state.mlMinimized ? '&#43;' : '&#8722;';
+}
+
+function clampValue(value, minValue, maxValue) {
+  return Math.max(minValue, Math.min(maxValue, value));
+}
+
+function formatSigned(value, digits = 2, suffix = '') {
+  if (!isFinite(value)) return '—';
+  return `${value >= 0 ? '+' : ''}${value.toFixed(digits)}${suffix}`;
+}
+
+function phaseName(phase) {
+  if (phase === 0) return 'Powered Ascent';
+  if (phase === 1) return 'Coast to Apogee';
+  if (phase === 2) return 'Freefall';
+  if (phase === 3) return 'Powered Descent';
+  if (phase === 4) return 'Touchdown';
+  return 'Unknown';
+}
+
+function sensorNoise(sample, seed, scale) {
+  return (
+    Math.sin(sample.t * (0.7 + seed * 0.11) + seed * 1.37) +
+    0.5 * Math.cos(sample.t * (1.4 + seed * 0.07) + seed * 0.83)
+  ) * scale;
+}
+
+function computeMeasuredTelemetry(sample, run) {
+  const faultBias = run ? run.fault_intensity || 0 : 0;
+  const windFault = run && run.fault_types.includes('WIND_GUST') ? 1 : 0;
+  const dragFault = run && run.fault_types.includes('DRAG_CHANGE') ? 1 : 0;
+  const massFault = run && run.fault_types.includes('MASS_LOSS') ? 1 : 0;
+  const windMag = Math.sqrt((sample.windX || 0) ** 2 + (sample.windY || 0) ** 2);
+  const ttiActual = sample.vz < 0 && sample.z > 0 ? sample.z / Math.abs(sample.vz) : NaN;
+
+  const altitudeMeasured = Math.max(0, sample.z + sensorNoise(sample, 1, 0.45 + 0.55 * faultBias));
+  const verticalMeasured = sample.vz + sensorNoise(sample, 2, 0.18 + 0.30 * faultBias) - dragFault * 0.12 * sample.vz;
+  const horizontalActual = Math.sqrt(sample.vx * sample.vx + sample.vy * sample.vy);
+  const horizontalMeasured = Math.max(0, horizontalActual + sensorNoise(sample, 3, 0.16 + 0.25 * (faultBias + 0.3 * windFault)));
+  const speedActual = Math.sqrt(sample.vx * sample.vx + sample.vy * sample.vy + sample.vz * sample.vz);
+  const speedMeasured = Math.max(0, speedActual + sensorNoise(sample, 4, 0.18 + 0.25 * faultBias));
+  const massMeasured = Math.max(run ? run.dry_mass : 0.1, sample.mass + sensorNoise(sample, 5, 0.002 + 0.006 * massFault + 0.002 * faultBias));
+  const windMeasured = Math.max(0, windMag + sensorNoise(sample, 6, 0.10 + 0.45 * windFault + 0.12 * faultBias));
+  const ttiMeasured = verticalMeasured < -0.01 && altitudeMeasured > 0 ? altitudeMeasured / Math.abs(verticalMeasured) : NaN;
+
+  const propellantMass = run ? run.propellant_mass : 0;
+  const burnProgress = run && propellantMass > 0 ? clampValue((run.dry_mass + propellantMass - sample.mass) / propellantMass, 0, 1) : 0;
+  const ekfMass = sample.mass + sensorNoise(sample, 7, 0.003 + 0.004 * faultBias) + (massMeasured - sample.mass) * 0.35 * (1 - burnProgress * 0.4);
+  const ekfCd = (run ? run.drag_coefficient : 0.5) + sensorNoise(sample, 8, 0.004 + 0.02 * dragFault + 0.006 * faultBias) + (sample.faultMag || 0) * 0.03 * dragFault;
+
+  return {
+    altitudeActual: sample.z,
+    altitudeMeasured,
+    verticalActual: sample.vz,
+    verticalMeasured,
+    horizontalActual,
+    horizontalMeasured,
+    speedActual,
+    speedMeasured,
+    massActual: sample.mass,
+    massMeasured,
+    windActual: windMag,
+    windMeasured,
+    ttiActual,
+    ttiMeasured,
+    ekfMass,
+    ekfCd,
+  };
+}
+
+function setDualValue(actualId, measuredId, actualValue, measuredValue, unit, digits = 2) {
+  document.getElementById(actualId).textContent = isFinite(actualValue) ? `${actualValue.toFixed(digits)} ${unit}`.trim() : '—';
+  document.getElementById(measuredId).textContent = isFinite(measuredValue) ? `${measuredValue.toFixed(digits)} ${unit}`.trim() : '—';
+}
+
+function updateConfiguration(run) {
+  if (!run) return;
+  const dryMass = typeof run.dry_mass === 'number' ? run.dry_mass : 1.219;
+  const propellantMass = typeof run.propellant_mass === 'number' ? run.propellant_mass : 0.191;
+  const thrustAverage = typeof run.thrust_average === 'number' ? run.thrust_average : 89.0;
+  const nominalIgnition = typeof run.nominal_ignition_altitude === 'number' ? run.nominal_ignition_altitude : 36.11;
+  const effectiveIgnition = typeof run.effective_ignition_altitude === 'number' ? run.effective_ignition_altitude : nominalIgnition;
+  const dragCoefficient = typeof run.drag_coefficient === 'number' ? run.drag_coefficient : 0.48;
+  const airDensity = typeof run.air_density === 'number' ? run.air_density : 1.18;
+  const windSpeed = typeof run.wind_speed === 'number' ? run.wind_speed : 0.0;
+
+  document.getElementById('cfg-mode').textContent = run.mode;
+  document.getElementById('cfg-ign-nom').textContent = `${nominalIgnition.toFixed(2)} m`;
+  document.getElementById('cfg-ign-eff').textContent = `${effectiveIgnition.toFixed(2)} m`;
+  document.getElementById('cfg-dry-mass').textContent = `${dryMass.toFixed(3)} kg`;
+  document.getElementById('cfg-prop-mass').textContent = `${propellantMass.toFixed(3)} kg`;
+  document.getElementById('cfg-thrust').textContent = `${thrustAverage.toFixed(1)} N`;
+  document.getElementById('cfg-cd').textContent = dragCoefficient.toFixed(2);
+  document.getElementById('cfg-rho').textContent = `${airDensity.toFixed(2)} kg/m3`;
+  document.getElementById('cfg-wind').textContent = `${windSpeed.toFixed(1)} m/s`;
+}
+
+function detectTimelineEvents(traj, run) {
+  if (!traj || !traj.length) return [];
+  const events = [{ label: 'Liftoff', time: traj[0][COLS.T], className: 'liftoff' }];
+  const burnoutIndex = traj.findIndex(row => row[COLS.PH] > 0);
+  if (burnoutIndex >= 0) events.push({ label: 'Burnout', time: traj[burnoutIndex][COLS.T], className: 'burnout' });
+
+  let apogeeRow = traj[0];
+  for (const row of traj) {
+    if (row[COLS.Z] > apogeeRow[COLS.Z]) apogeeRow = row;
+  }
+  events.push({ label: 'Apogee', time: apogeeRow[COLS.T], className: 'apogee' });
+
+  const ignitionIndex = traj.findIndex(row => row[COLS.PH] === 3);
+  if (ignitionIndex >= 0) events.push({ label: 'Ignition', time: traj[ignitionIndex][COLS.T], className: 'ignition' });
+
+  const touchdownRow = traj[traj.length - 1];
+  events.push({ label: 'Touchdown', time: touchdownRow[COLS.T], className: run && run.success ? 'touchdown' : 'failure' });
+  return events;
+}
+
+function renderTimelineMarkers() {
+  const container = document.getElementById('timeline-markers');
+  container.innerHTML = '';
+  const traj = state.currentTrajectory;
+  if (!traj || traj.length < 2) return;
+  const tMax = traj[traj.length - 1][COLS.T];
+  for (const event of state.currentEvents) {
+    const marker = document.createElement('div');
+    marker.className = `timeline-marker ${event.className || ''}`.trim();
+    marker.style.left = `${tMax > 0 ? (event.time / tMax) * 100 : 0}%`;
+    marker.title = `${event.label} @ ${event.time.toFixed(2)}s`;
+    const label = document.createElement('span');
+    label.textContent = event.label;
+    marker.appendChild(label);
+    container.appendChild(marker);
+  }
+}
+
+function updateCorrectionBar(sample) {
+  const bar = document.getElementById('correction-bar');
+  if (!state.currentRun || state.currentRun.mode !== 'ML') {
+    bar.classList.add('hidden');
+    return;
+  }
+
+  const correction = sample ? (sample.mlCorrection || 0) : 0;
+  const minCorrection = -6;
+  const maxCorrection = 8;
+  const span = maxCorrection - minCorrection;
+  const centerPercent = ((0 - minCorrection) / span) * 100;
+  const currentPercent = clampValue(((correction - minCorrection) / span) * 100, 0, 100);
+  const left = Math.min(centerPercent, currentPercent);
+  const width = Math.max(0.8, Math.abs(currentPercent - centerPercent));
+  const fill = document.getElementById('corr-fill');
+
+  fill.style.left = `${left}%`;
+  fill.style.width = `${width}%`;
+  fill.style.background = correction >= 0 ? 'rgba(0,212,255,0.8)' : 'rgba(255,152,0,0.8)';
+  document.getElementById('corr-value').textContent = formatSigned(correction, 2, ' m');
+  document.getElementById('corr-value').style.color = correction >= 0 ? 'var(--accent)' : 'var(--warning)';
+  bar.classList.remove('hidden');
+}
+
+window.toggleSidebar = function() {
+  state.sidebarCollapsed = !state.sidebarCollapsed;
+  applyChromeState();
+};
+
+window.toggleHud = function() {
+  state.hudMinimized = !state.hudMinimized;
+  applyChromeState();
+};
+
+window.toggleMlOverlay = function() {
+  state.mlMinimized = !state.mlMinimized;
+  applyChromeState();
+};
 
 // ═══════════════════════════════════════════════════════════════
 // RENDERER & SCENE SETUP
@@ -625,34 +968,91 @@ scene.add(padRing);
 
 // Satellite tile (loaded on demand via settings toggle, OFF by default)
 let satelliteTex = null;
-let activeSatUrl = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/14/8413/5385';
+let activeSatRequest = { lat: 51.5074, lon: -0.1278, zoom: 18, radius: 1 };
 
-window.setSatellite = function(enabled, overrideUrl) {
+function satelliteTileUrl(zoom, tileY, tileX) {
+  return `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${zoom}/${tileY}/${tileX}`;
+}
+
+function fetchSatelliteImage(url) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = url;
+  });
+}
+
+async function buildSatelliteMosaic(lat, lon, zoom, radius = 1) {
+  const n = Math.pow(2, zoom);
+  const tileX = Math.floor((lon + 180) / 360 * n);
+  const latRad = lat * Math.PI / 180;
+  const tileY = Math.floor((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * n);
+  const tileSize = 256;
+  const mosaicSize = radius * 2 + 1;
+  const canvas = document.createElement('canvas');
+  canvas.width = tileSize * mosaicSize;
+  canvas.height = tileSize * mosaicSize;
+  const ctx = canvas.getContext('2d');
+
+  const tasks = [];
+  for (let row = -radius; row <= radius; row++) {
+    for (let col = -radius; col <= radius; col++) {
+      const px = (col + radius) * tileSize;
+      const py = (row + radius) * tileSize;
+      tasks.push(
+        fetchSatelliteImage(satelliteTileUrl(zoom, tileY + row, tileX + col)).then((img) => ({ img, px, py }))
+      );
+    }
+  }
+
+  const results = await Promise.allSettled(tasks);
+  let drawn = 0;
+  for (const result of results) {
+    if (result.status !== 'fulfilled') continue;
+    const { img, px, py } = result.value;
+    ctx.drawImage(img, px, py, tileSize, tileSize);
+    drawn += 1;
+  }
+  if (!drawn) throw new Error('No satellite tiles loaded');
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(3, 3);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+async function applySatelliteTexture(request) {
+  const tex = await buildSatelliteMosaic(request.lat, request.lon, request.zoom, request.radius);
+  satelliteTex = tex;
+  groundMat.map = tex;
+  groundMat.emissiveMap = tex;
+  groundMat.needsUpdate = true;
+}
+
+window.setSatellite = function(enabled, overrideRequest) {
   state.satelliteEnabled = enabled;
   const ctrl = document.getElementById('sat-controls');
   if (ctrl) ctrl.style.display = enabled ? '' : 'none';
   if (enabled) {
-    const urlToLoad = overrideUrl || activeSatUrl;
-    // Force reload if URL changed
-    if (overrideUrl && overrideUrl !== activeSatUrl) {
-      activeSatUrl = overrideUrl;
-      satelliteTex = null;
+    if (overrideRequest) {
+      const changed = JSON.stringify(overrideRequest) !== JSON.stringify(activeSatRequest);
+      activeSatRequest = overrideRequest;
+      if (changed && satelliteTex) {
+        satelliteTex.dispose();
+        satelliteTex = null;
+      }
     }
     if (satelliteTex) {
       groundMat.map = satelliteTex;
+      groundMat.emissiveMap = satelliteTex;
       groundMat.needsUpdate = true;
     } else {
-      new THREE.TextureLoader().load(urlToLoad, (tex) => {
-        satelliteTex = tex;
-        tex.colorSpace = THREE.SRGBColorSpace;
-        tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-        tex.repeat.set(8, 8);
-        groundMat.map = tex;
-        // Re-apply emissiveMap for brightness > 1
-        groundMat.emissiveMap = tex;
-        groundMat.needsUpdate = true;
-      }, undefined, () => {
-        console.warn('Satellite tile failed (CORS/network). Try from a web server.');
+      applySatelliteTexture(activeSatRequest).catch(() => {
+        console.warn('Satellite imagery failed (CORS/network). Try from a web server.');
         document.getElementById('tog-satellite').checked = false;
         state.satelliteEnabled = false;
         if (ctrl) ctrl.style.display = 'none';
@@ -673,12 +1073,7 @@ window.loadSatTile = function() {
     alert('Invalid coordinates. Latitude: -85.05 to 85.05, Longitude: -180 to 180.');
     return;
   }
-  const n = Math.pow(2, zoom);
-  const tileX = Math.floor((lon + 180) / 360 * n);
-  const latRad = lat * Math.PI / 180;
-  const tileY = Math.floor((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * n);
-  const url = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${zoom}/${tileY}/${tileX}`;
-  setSatellite(true, url);
+  setSatellite(true, { lat, lon, zoom, radius: 1 });
 };
 
 window.updateSatBrightness = function(b) {
@@ -787,6 +1182,49 @@ function buildDefaultRocket() {
   rocketGroup.add(flameGroup);
 }
 buildDefaultRocket();
+
+// ═══════════════════════════════════════════════════════════════
+// SECONDARY BODY — payload satellite with TVC thruster
+// ═══════════════════════════════════════════════════════════════
+const secondaryGroup = new THREE.Group();
+{
+  // Gold material for payload body
+  const payloadMat = new THREE.MeshStandardMaterial({ color: 0xFFD700, roughness: 0.35, metalness: 0.7 });
+  // Dark accent for nozzle/thruster
+  const nozzleMat = new THREE.MeshStandardMaterial({ color: 0x444444, roughness: 0.6, metalness: 0.8 });
+  // Solar panel blue
+  const panelMat = new THREE.MeshStandardMaterial({ color: 0x2255AA, roughness: 0.3, metalness: 0.5, emissive: 0x112244, emissiveIntensity: 0.3 });
+
+  // Main body — short cylinder (bus)
+  const bus = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.3, 16), payloadMat);
+  bus.position.y = 0.15;
+  bus.castShadow = true;
+  secondaryGroup.add(bus);
+
+  // Nose cone on top
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.18, 16), payloadMat);
+  nose.position.y = 0.39;
+  nose.castShadow = true;
+  secondaryGroup.add(nose);
+
+  // Thruster nozzle at bottom
+  const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.07, 0.08, 12), nozzleMat);
+  nozzle.position.y = -0.04;
+  secondaryGroup.add(nozzle);
+
+  // Solar panel stubs (two flat boxes on sides)
+  const panelGeo = new THREE.BoxGeometry(0.28, 0.02, 0.10);
+  const panelL = new THREE.Mesh(panelGeo, panelMat);
+  panelL.position.set(-0.26, 0.15, 0);
+  panelL.castShadow = true;
+  secondaryGroup.add(panelL);
+  const panelR = new THREE.Mesh(panelGeo, panelMat);
+  panelR.position.set(0.26, 0.15, 0);
+  panelR.castShadow = true;
+  secondaryGroup.add(panelR);
+}
+secondaryGroup.visible = false;
+scene.add(secondaryGroup);
 
 // ═══════════════════════════════════════════════════════════════
 // PARTICLE EXHAUST SYSTEM — sprite-based Points
@@ -967,29 +1405,8 @@ function updateFaultParticles(dt) {
 let dragScaleTarget = 1.0;
 let dragScaleCurrent = 1.0;
 
-// Fault toast state
+// Fault onset state
 let lastFaultType = 0;
-let faultToastTimer = 0;
-const FAULT_NAMES = { 1: 'WIND GUST', 2: 'DRAG CHANGE', 3: 'MASS LOSS', 4: 'COMBINED FAULTS' };
-const FAULT_CLASSES = { 1: 'wind', 2: 'drag', 3: 'mass', 4: 'combined' };
-
-function showFaultToast(faultType, magnitude) {
-  const toast = document.getElementById('fault-toast');
-  const name = FAULT_NAMES[faultType] || 'FAULT';
-  const pct = (magnitude * 100).toFixed(0);
-  toast.textContent = '\u26A0 ' + name + ' DETECTED — Intensity ' + pct + '%';
-  toast.className = 'visible ' + (FAULT_CLASSES[faultType] || '');
-  faultToastTimer = 3.0;
-}
-
-function updateFaultToast(dt) {
-  if (faultToastTimer > 0) {
-    faultToastTimer -= dt;
-    if (faultToastTimer <= 0) {
-      document.getElementById('fault-toast').className = '';
-    }
-  }
-}
 
 function updateFaultEffects(sample, dt) {
   if (!sample || !state.playing) {
@@ -1000,9 +1417,9 @@ function updateFaultEffects(sample, dt) {
   const fm = sample.faultMag || 0;
   const rPos = rocketGroup.position;
 
-  // Detect fault onset for toast
+  // Detect fault onset for visual effects only
   if (ft !== 0 && lastFaultType === 0) {
-    showFaultToast(ft, fm);
+    lastFaultType = ft;
   }
   lastFaultType = ft;
 
@@ -1116,6 +1533,32 @@ function addTrailPoint(x, y, z, color) {
   trailGeo.attributes.position.needsUpdate = true;
   trailGeo.attributes.color.needsUpdate = true;
   trailGeo.setDrawRange(0, trailCount);
+}
+
+// ── Secondary body trail (orange) ──
+const MAX_SEC_TRAIL = 2000;
+const secTrailPositions = new Float32Array(MAX_SEC_TRAIL * 3);
+const secTrailGeo = new THREE.BufferGeometry();
+secTrailGeo.setAttribute('position', new THREE.BufferAttribute(secTrailPositions, 3));
+const secTrailMat = new THREE.LineDashedMaterial({
+  color: 0xff8800, transparent: true, opacity: 0.7,
+  dashSize: 0.8, gapSize: 0.3
+});
+const secTrailLine = new THREE.Line(secTrailGeo, secTrailMat);
+secTrailLine.frustumCulled = false;
+scene.add(secTrailLine);
+let secTrailCount = 0;
+
+function resetSecTrail() { secTrailCount = 0; secTrailGeo.setDrawRange(0, 0); }
+
+function addSecTrailPoint(x, y, z) {
+  if (secTrailCount >= MAX_SEC_TRAIL) return;
+  const i = secTrailCount * 3;
+  secTrailPositions[i] = x; secTrailPositions[i + 1] = y; secTrailPositions[i + 2] = z;
+  secTrailCount++;
+  secTrailGeo.attributes.position.needsUpdate = true;
+  secTrailGeo.setDrawRange(0, secTrailCount);
+  secTrailLine.computeLineDistances();
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1240,10 +1683,6 @@ runs.forEach((run, idx) => {
 
   const statusClass = run.status_label === 'SUCCESS' ? 'badge-success' : run.status_label === 'FAIL' ? 'badge-fail' : 'badge-crash';
   const modeClass = run.mode === 'ML' ? 'badge-ml' : 'badge-opt';
-  const fi = run.fault_intensity;
-  const fiColor = fi < 0.3 ? 'var(--success)' : fi < 0.6 ? 'var(--warning)' : 'var(--danger)';
-  const faultStr = run.fault_types.length ? run.fault_types.join(', ') : 'None';
-
   card.innerHTML = `
     <div class="card-header">
       <span class="card-title">${run.name}</span>
@@ -1252,13 +1691,6 @@ runs.forEach((run, idx) => {
         <span class="badge ${statusClass}">${run.status_label}</span>
       </span>
     </div>
-    <div class="card-stats">
-      <span>Faults: ${faultStr}</span>
-      <span>FI: ${fi.toFixed(2)}</span>
-      <span>V<sub>land</sub>: ${run.landing_velocity.toFixed(1)} m/s</span>
-      <span>Dist: ${run.landing_distance.toFixed(1)} m</span>
-    </div>
-    <div class="fault-bar"><div class="fault-bar-fill" style="width:${fi * 100}%;background:${fiColor}"></div></div>
   `;
 
   card.addEventListener('click', () => loadRun(run.id));
@@ -1274,7 +1706,9 @@ function loadRun(runId) {
 
   state.currentRun = run;
   state.currentTrajectory = TRAJECTORY_DATA[runId];
+  state.currentEvents = detectTimelineEvents(state.currentTrajectory, run);
   state.currentTime = 0;
+  state.loopRestartRemaining = 0;
   state.playing = false;
   document.getElementById('play-btn').innerHTML = '&#9654;';
 
@@ -1284,13 +1718,14 @@ function loadRun(runId) {
 
   // Reset trail and crash
   resetTrail();
+  resetSecTrail();
+  secondaryGroup.visible = false;
   crashActive = false;
   crashFlash.material.opacity = 0;
   predRing.visible = false;
   lastTrailTime = -1;
+  lastSecTrailTime = -1;
   lastFaultType = 0;
-  faultToastTimer = 0;
-  document.getElementById('fault-toast').className = '';
   dragScaleTarget = 1.0;
   dragScaleCurrent = 1.0;
 
@@ -1298,16 +1733,15 @@ function loadRun(runId) {
   const isML = run.mode === 'ML';
   document.getElementById('ml-overlay').style.display = isML ? '' : 'none';
   if (isML) {
-    document.getElementById('ml-mode').textContent = run.mode;
+    document.getElementById('ml-mode').textContent = 'Online Correction';
     document.getElementById('ml-faults').textContent = run.fault_types.length ? run.fault_types.join(', ') : 'None';
-    document.getElementById('ml-intensity').textContent = run.fault_intensity.toFixed(2);
-    const fi = run.fault_intensity;
-    const fiBar = document.getElementById('ml-intensity-bar');
-    fiBar.style.width = (fi * 100) + '%';
-    fiBar.style.background = fi < 0.3 ? 'var(--success)' : fi < 0.6 ? 'var(--warning)' : 'var(--danger)';
     document.getElementById('ml-lvel').textContent = run.landing_velocity.toFixed(2) + ' m/s';
     document.getElementById('ml-ldist').textContent = run.landing_distance.toFixed(2) + ' m';
   }
+
+  updateConfiguration(run);
+  renderTimelineMarkers();
+  updateCorrectionBar(null);
 
   // Update timeline
   const tMax = state.currentTrajectory[state.currentTrajectory.length - 1][COLS.T];
@@ -1327,6 +1761,18 @@ window.togglePlay = function() {
   if (!state.currentTrajectory) return;
   state.playing = !state.playing;
   document.getElementById('play-btn').innerHTML = state.playing ? '&#9646;&#9646;' : '&#9654;';
+};
+
+function syncLoopButton() {
+  const loopBtn = document.getElementById('loop-btn');
+  loopBtn.classList.toggle('loop-active', state.loopPlayback);
+  loopBtn.title = state.loopPlayback ? 'Simulation loop on' : 'Simulation loop off';
+}
+
+window.toggleLoop = function() {
+  state.loopPlayback = !state.loopPlayback;
+  if (!state.loopPlayback) state.loopRestartRemaining = 0;
+  syncLoopButton();
 };
 
 window.skipTime = function(delta) {
@@ -1542,6 +1988,14 @@ document.getElementById('csv-upload').addEventListener('change', (e) => {
       success: true,
       landing_velocity: 0,
       landing_distance: 0,
+      dry_mass: 1.219,
+      propellant_mass: 0.191,
+      thrust_average: 89.0,
+      nominal_ignition_altitude: 36.11,
+      effective_ignition_altitude: 36.11,
+      drag_coefficient: 0.48,
+      air_density: 1.18,
+      wind_speed: 0.0,
       color: '#00d4ff',
       status_label: 'CUSTOM',
     };
@@ -1556,7 +2010,6 @@ document.getElementById('csv-upload').addEventListener('change', (e) => {
         <span class="card-title">${customRun.name}</span>
         <span class="badge" style="background:rgba(0,212,255,0.2);color:#67e8f9">CUSTOM</span>
       </div>
-      <div class="card-stats"><span>${rows.length} points, ${rows[rows.length-1][0].toFixed(1)}s</span></div>
     `;
     card.addEventListener('click', () => loadRun(customId));
     cardsContainer.appendChild(card);
@@ -1620,30 +2073,26 @@ function updateHUD(sample, isBurning) {
   if (!sample) return;
   const alt = sample.z;
   const vVel = sample.vz;
-  const hVel = Math.sqrt(sample.vx * sample.vx + sample.vy * sample.vy);
-  const speed = Math.sqrt(sample.vx * sample.vx + sample.vy * sample.vy + sample.vz * sample.vz);
+  const measured = computeMeasuredTelemetry(sample, state.currentRun);
 
   document.getElementById('h-time').textContent = sample.t.toFixed(3) + 's';
+  document.getElementById('h-phase').textContent = phaseName(sample.phase);
 
-  const altEl = document.getElementById('h-alt');
-  altEl.textContent = alt.toFixed(2) + ' m';
-  altEl.style.color = alt > 50 ? 'var(--success)' : alt > 10 ? 'var(--warning)' : 'var(--danger)';
+  setDualValue('h-alt-actual', 'h-alt-measured', measured.altitudeActual, measured.altitudeMeasured, 'm', 2);
+  setDualValue('h-vvel-actual', 'h-vvel-measured', measured.verticalActual, measured.verticalMeasured, 'm/s', 2);
+  setDualValue('h-hvel-actual', 'h-hvel-measured', measured.horizontalActual, measured.horizontalMeasured, 'm/s', 2);
+  setDualValue('h-speed-actual', 'h-speed-measured', measured.speedActual, measured.speedMeasured, 'm/s', 2);
+  setDualValue('h-mass-actual', 'h-mass-measured', measured.massActual, measured.massMeasured, 'kg', 3);
+  setDualValue('h-wind-actual', 'h-wind-measured', measured.windActual, measured.windMeasured, 'm/s', 2);
+  document.getElementById('h-tti-actual').textContent = isFinite(measured.ttiActual) ? `${measured.ttiActual.toFixed(1)} s` : '—';
+  document.getElementById('h-tti-measured').textContent = isFinite(measured.ttiMeasured) ? `${measured.ttiMeasured.toFixed(1)} s` : '—';
+  document.getElementById('h-ekf-mass').textContent = `${measured.ekfMass.toFixed(3)} kg`;
+  document.getElementById('h-ekf-cd').textContent = measured.ekfCd.toFixed(3);
 
-  const vvelEl = document.getElementById('h-vvel');
-  vvelEl.textContent = vVel.toFixed(2) + ' m/s';
-  vvelEl.style.color = vVel > 0 ? 'var(--success)' : vVel > -5 ? 'var(--warning)' : 'var(--danger)';
-
-  document.getElementById('h-hvel').textContent = hVel.toFixed(2) + ' m/s';
-  document.getElementById('h-speed').textContent = speed.toFixed(2) + ' m/s';
-  document.getElementById('h-mass').textContent = sample.mass.toFixed(3) + ' kg';
-
-  // TTI estimate
-  if (vVel < 0 && alt > 0) {
-    const tti = alt / Math.abs(vVel);
-    document.getElementById('h-tti').textContent = tti.toFixed(1) + 's';
-  } else {
-    document.getElementById('h-tti').textContent = '—';
-  }
+  const altActualEl = document.getElementById('h-alt-actual');
+  altActualEl.style.color = alt > 50 ? 'var(--success)' : alt > 10 ? 'var(--warning)' : 'var(--danger)';
+  const vvelActualEl = document.getElementById('h-vvel-actual');
+  vvelActualEl.style.color = vVel > 0 ? 'var(--success)' : vVel > -5 ? 'var(--warning)' : 'var(--danger)';
 
   // Engine status
   const statusEl = document.getElementById('engine-status');
@@ -1678,19 +2127,14 @@ function updateHUD(sample, isBurning) {
 // ML OVERLAY UPDATE — ignition altitude correction
 // ═══════════════════════════════════════════════════════════════
 function computeBaselineIgnitionAlt(run) {
-  // Scan trajectory for descent-burn start (phase 3) to find actual ignition altitude
-  const traj = state.currentTrajectory;
-  if (!traj) return 30;
-  for (let i = 0; i < traj.length; i++) {
-    if (traj[i][COLS.PH] === 3) return traj[i][COLS.Z];
-  }
-  return 30;
+  return run && typeof run.nominal_ignition_altitude === 'number' ? run.nominal_ignition_altitude : 30;
 }
 
 function updateMLOverlay(sample) {
   const overlay = document.getElementById('ml-overlay');
   if (!state.currentRun || state.currentRun.mode !== 'ML') {
     overlay.style.display = 'none';
+    updateCorrectionBar(null);
     return;
   }
   overlay.style.display = '';
@@ -1705,6 +2149,7 @@ function updateMLOverlay(sample) {
   corrEl.textContent = (mlCorrection >= 0 ? '+' : '') + mlCorrection.toFixed(2) + ' m';
   corrEl.style.color = Math.abs(mlCorrection) < 0.5 ? 'var(--text)' : mlCorrection > 0 ? 'var(--accent)' : 'var(--warning)';
   document.getElementById('ml-ign-adj').textContent = adjustedIgn.toFixed(1) + ' m';
+  updateCorrectionBar(sample);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1713,11 +2158,13 @@ function updateMLOverlay(sample) {
 const clock = new THREE.Clock();
 let frameCount = 0, fpsTime = 0;
 let lastTrailTime = -1;
+let lastSecTrailTime = -1;
 let cameraShake = new THREE.Vector3();
 
 function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.05);
+  const LOOP_RESTART_DELAY = 2.5;
 
   // FPS counter
   frameCount++;
@@ -1732,18 +2179,40 @@ function animate() {
     const tMax = state.currentTrajectory[state.currentTrajectory.length - 1][COLS.T];
     state.currentTime += dt * state.speed;
     if (state.currentTime >= tMax) {
-      state.currentTime = tMax;
-      state.playing = false;
-      document.getElementById('play-btn').innerHTML = '&#9654;';
+      if (state.loopPlayback) {
+        state.currentTime = tMax;
+        if (state.loopRestartRemaining <= 0) {
+          state.loopRestartRemaining = LOOP_RESTART_DELAY;
+        } else {
+          state.loopRestartRemaining = Math.max(0, state.loopRestartRemaining - dt);
+          if (state.loopRestartRemaining <= 0) {
+            state.currentTime = 0;
+            resetTrail();
+            resetSecTrail();
+            secondaryGroup.visible = false;
+            crashActive = false;
+            crashFlash.material.opacity = 0;
+            predRing.visible = false;
+            lastTrailTime = -1;
+            lastSecTrailTime = -1;
+            lastFaultType = 0;
+          }
+        }
+      } else {
+        state.currentTime = tMax;
+        state.loopRestartRemaining = 0;
+        state.playing = false;
+        document.getElementById('play-btn').innerHTML = '&#9654;';
 
-      // Trigger crash if needed
-      if (state.currentRun && !state.currentRun.success && state.currentRun.status_label === 'CRASH') {
-        const s = sampleTrajectory(state.currentTrajectory, tMax);
-        if (s) triggerCrash(new THREE.Vector3(
-          s.x * state.lateralScale,
-          s.z * state.verticalScale,
-          s.y * state.lateralScale
-        ));
+        // Trigger crash if needed
+        if (state.currentRun && !state.currentRun.success && state.currentRun.status_label === 'CRASH') {
+          const s = sampleTrajectory(state.currentTrajectory, tMax);
+          if (s) triggerCrash(new THREE.Vector3(
+            s.x * state.lateralScale,
+            s.z * state.verticalScale,
+            s.y * state.lateralScale
+          ));
+        }
       }
     }
     updateTimeDisplay();
@@ -1791,6 +2260,57 @@ function animate() {
     }
     trailLine.visible = state.showTrail;
 
+    // ── Secondary body (payload satellite) ──
+    if (typeof SECONDARY_BODY !== 'undefined' && SECONDARY_BODY.length > 0) {
+      const secSepTime = SECONDARY_BODY[0][0];
+      if (state.currentTime >= secSepTime) {
+        // Interpolate secondary body data
+        let sLo = 0, sHi = SECONDARY_BODY.length - 1;
+        const sTime = Math.min(state.currentTime, SECONDARY_BODY[sHi][0]);
+        while (sHi - sLo > 1) {
+          const sMid = (sLo + sHi) >> 1;
+          if (SECONDARY_BODY[sMid][0] <= sTime) sLo = sMid; else sHi = sMid;
+        }
+        const st0 = SECONDARY_BODY[sLo][0], st1 = SECONDARY_BODY[sHi][0];
+        const sFrac = st1 > st0 ? (sTime - st0) / (st1 - st0) : 0;
+        const sDx = SECONDARY_BODY[sLo][1] + (SECONDARY_BODY[sHi][1] - SECONDARY_BODY[sLo][1]) * sFrac;
+        const sDy = SECONDARY_BODY[sLo][2] + (SECONDARY_BODY[sHi][2] - SECONDARY_BODY[sLo][2]) * sFrac;
+        const sAlt = SECONDARY_BODY[sLo][3] + (SECONDARY_BODY[sHi][3] - SECONDARY_BODY[sLo][3]) * sFrac;
+
+        // Get primary body position at separation to use as base offset
+        const sepSample = sampleTrajectory(state.currentTrajectory, secSepTime);
+        if (sepSample) {
+          const secPx = (sepSample.x + sDx) * state.lateralScale;
+          const secPy = sAlt * state.verticalScale;
+          const secPz = (sepSample.y + sDy) * state.lateralScale;
+
+          secondaryGroup.position.set(secPx, secPy, secPz);
+          secondaryGroup.visible = true;
+
+          // Payload has TVC — maintain mostly upright orientation
+          // Compute velocity direction for slight tilt
+          const sValt = (SECONDARY_BODY[sHi][3] - SECONDARY_BODY[sLo][3]) / Math.max(st1 - st0, 0.001);
+          const sVx = (SECONDARY_BODY[sHi][1] - SECONDARY_BODY[sLo][1]) / Math.max(st1 - st0, 0.001);
+          // Slight pitch toward velocity (max ~15 degrees)
+          const pitchAngle = Math.atan2(sVx, Math.abs(sValt) + 0.1) * 0.5;
+          secondaryGroup.rotation.set(0, 0, -pitchAngle);
+
+          // Secondary trail
+          if (state.showTrail) {
+            const secTrailInterval = 0.1;
+            if (sTime - lastSecTrailTime > secTrailInterval) {
+              addSecTrailPoint(secPx, secPy, secPz);
+              lastSecTrailTime = sTime;
+            }
+          }
+          secTrailLine.visible = state.showTrail;
+        }
+      } else {
+        secondaryGroup.visible = false;
+        secTrailLine.visible = false;
+      }
+    }
+
     // Landing prediction
     if (py > 2 && sample.vz < 0) {
       const tti = py / Math.abs(sample.vz * state.verticalScale);
@@ -1815,15 +2335,13 @@ function animate() {
     updateHUD(sample, isBurning);
     updateMLOverlay(sample);
 
-    // Fault effects (particles, geometry, toast)
+    // Fault effects (particles, geometry)
     updateFaultEffects(sample, dt);
   }
 
   // Update particles
   updateParticles(dt);
   updateFaultParticles(dt);
-  updateFaultToast(dt);
-
   // Crash effect
   if (crashActive) {
     crashTime += dt;
@@ -1925,9 +2443,11 @@ setTimeout(() => {
 }, 800);
 
 loadRun('demo_01_baseline');
+applyChromeState();
+syncLoopButton();
 animate();
 
-console.log('%c HexaVisual Pro (Demo) %c Loaded successfully ', 'background:#0a0a14;color:#00d4ff;font-weight:bold;padding:4px 8px;border-radius:4px 0 0 4px', 'background:#1a1a2e;color:#b794f6;padding:4px 8px;border-radius:0 4px 4px 0');
+console.log('Flight data viewer loaded');
 </script>
 </body>
 </html>

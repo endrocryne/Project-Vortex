@@ -1,0 +1,228 @@
+================================================================================
+HERMES PRESENTATION FIGURE GENERATION - COMPLETE
+================================================================================
+
+Project: Project HERMES / Project Vortex - Hoverslam Flight Control System
+Generated: 2026-03-11
+
+================================================================================
+DIRECTORIES CREATED
+================================================================================
+
+✓ /sessions/pensive-clever-thompson/mnt/Project-Vortex/Presentation/Scripts/
+  - Contains 6 Python scripts for figure generation
+  - Total size: ~64 KB
+
+✓ /sessions/pensive-clever-thompson/mnt/Project-Vortex/Presentation/figures/
+  - Contains 16 generated PNG figures
+  - Total size: ~1.9 MB
+  - DPI: 150 (professional quality)
+
+================================================================================
+GENERATED FIGURES (16 total)
+================================================================================
+
+ARCHITECTURE & DESIGN DIAGRAMS
+------------------------------
+✓ fig_01_system_architecture.png (158 KB)
+  - 4-component HERMES architecture
+  - Core Simulation, Optimizer, ML Controller, Physical Hardware
+  - Data flow and integration diagram
+
+✓ fig_06_ekf_block_diagram.png (109 KB)
+  - Extended Kalman Filter state estimation
+  - Predict and update steps with equations
+
+✓ fig_07_pid_block_diagram.png (74 KB)
+  - PID attitude control loop
+  - TVC gimbal control with anti-windup
+
+✓ fig_08_fault_injection_diagram.png (100 KB)
+  - Fault types: MASS_LOSS, THRUST_VAR, DRAG_CHANGE, WIND_GUST
+  - Trigger modes and test matrix
+
+✓ fig_13_avionics_schematic.png (122 KB)
+  - Hardware block diagram
+  - Teensy 4.1 + BNO055 + MPL3115A2 + RFM95W
+
+FLIGHT PROFILE & REAL DATA
+--------------------------
+✓ fig_02_flight_profile.png (85 KB)
+  - 5-phase mission profile (Ascent, Separation, Coast, Descent, Burn)
+  - Conceptual trajectory visualization
+
+✓ fig_03_trajectory_baseline.png (167 KB)
+  - Real trajectory data from demo_01_baseline
+  - Altitude vs Time and Velocity vs Time
+  - Phase-colored shading
+
+OPTIMIZATION & PERFORMANCE
+--------------------------
+✓ fig_04_success_rate_curve.png (102 KB)
+  - Monte Carlo ignition altitude optimization
+  - Success rate: 100% at 36.107 m
+  - Viable range visualization
+
+✓ fig_05_demo_scenario_comparison.png (71 KB)
+  - 9 demo scenarios landing velocity comparison
+  - Color-coded by success (green) / failure (red)
+  - Success threshold marked
+
+✓ fig_11_ml_vs_optimizer.png (70 KB)
+  - Paired scenario comparison: Wind, Drag+Mass, Severe, Extreme
+  - ML corrections vs baseline optimizer
+
+✓ fig_12_landing_scatter.png (113 KB)
+  - Landing position accuracy for all 9 demos
+  - XY scatter with concentric rings (1m, 2m, 5m)
+  - Target at origin
+
+RESULTS & VALIDATION
+-------------------
+✓ fig_09_two_stage_comparison.png (171 KB)
+  - 42.7% apogee improvement (two-stage vs single)
+  - Motor separation benefit explanation
+
+✓ fig_10_accuracy_comparison.png (117 KB)
+  - HERMES vs RocketPy, OpenRocket, RockSim
+  - 73-86% better accuracy
+
+✓ fig_14_budget_breakdown.png (96 KB)
+  - Cost breakdown: Airframe $1500, Motors $1200, Recovery $400, etc.
+  - Cost comparison: $465/launch vs $250k+ commercial
+
+✓ fig_15_monte_carlo_heatmap.png (135 KB)
+  - Parameter sensitivity analysis
+  - 6 parameters × 5 variation levels
+  - Viridis colormap (red=high sensitivity)
+
+✓ fig_16_validation_summary.png (145 KB)
+  - 6 validation criteria achievement chart
+  - Apogee, Accuracy, Robustness, Affordability, Integration, Precision
+  - Overall assessment: SUCCESSFUL
+
+NEW FIGURES (added 2026-03-13)
+-------------------------------
+✓ fig_17_sensor_drift_example.png
+  - Sensor drift with ML correction example
+  - Shows ML fault-agnostic correction capability
+
+✓ fig_18_secondary_body.png (276 KB)
+  - Two-Stage Separation: Primary Vehicle vs. Ejected Casing
+  - Left: Altitude vs Time for both bodies with separation annotation
+  - Right: Vertical velocity vs Time for both bodies
+  - Dark background style, real flight data from Altitude_Raw_Data.csv
+
+✓ fig_19_ml_rockets_tested.png
+  - ML vs. Optimizer: Landing Velocity Across Rocket Configurations
+  - Scatter plot: 10 different rocket configs (mass 42-57 kg)
+  - Shows ML 100% success rate (10/10) vs Optimizer 40% (4/10)
+  - Points colored by dry mass, sized by motor thrust
+
+================================================================================
+PYTHON SCRIPTS
+================================================================================
+
+01_trajectory_figures.py (6.1 KB)
+  - Generates: fig_02, fig_03
+  - Real trajectory data loading and plotting
+  - Phase-based coloring (Ascent, Coast, Descent, Burn)
+
+02_optimization_figures.py (2.8 KB)
+  - Generates: fig_04
+  - Monte Carlo success rate curve
+  - Optimal ignition altitude identification
+
+03_demo_comparison_figures.py (7.4 KB)
+  - Generates: fig_05, fig_11, fig_12
+  - Demo scenario comparison
+  - ML vs Optimizer analysis
+  - Landing scatter plot
+
+04_architecture_diagrams.py (23 KB)
+  - Generates: fig_01, fig_06, fig_07, fig_08, fig_13
+  - System architecture and block diagrams
+  - Control loops and hardware schematics
+  - Matplotlib patches and annotations
+
+05_results_figures.py (13 KB)
+  - Generates: fig_09, fig_10, fig_14, fig_15, fig_16
+  - Performance results and analysis
+  - Cost breakdowns and sensitivity analysis
+
+run_all_figures.py (4.0 KB)
+  - Master script to execute all figure generation
+  - Verification and reporting
+  - Success/failure summary
+
+================================================================================
+DATA SOURCES
+================================================================================
+
+✓ Trajectory CSVs (9 demo runs)
+  Location: /sessions/pensive-clever-thompson/mnt/Project-Vortex/results/demo_runs/
+  Format: Time, X, Y, Z, VX, VY, VZ, QW, QX, QY, QZ, Mass, MLCorrection,
+          FaultType, FaultMag, WindX, WindY, Phase
+  
+✓ Demo Manifest
+  Location: /sessions/pensive-clever-thompson/mnt/Project-Vortex/results/demo_runs/demo_manifest.json
+  Contains: Metadata for 9 demo scenarios (success, landing velocity, etc.)
+
+✓ Optimization Data
+  Location: /sessions/pensive-clever-thompson/mnt/Project-Vortex/results/optimization_20260222_120325/optimization.csv
+  Contains: Ignition altitude sweep with success rates from Monte Carlo
+
+================================================================================
+EXECUTION RESULTS
+================================================================================
+
+Script Execution: ALL SUCCESSFUL ✓
+  ✓ 01_trajectory_figures.py: SUCCESS
+  ✓ 02_optimization_figures.py: SUCCESS
+  ✓ 03_demo_comparison_figures.py: SUCCESS
+  ✓ 04_architecture_diagrams.py: SUCCESS
+  ✓ 05_results_figures.py: SUCCESS
+
+Figure Generation: 19/19 COMPLETE ✓
+  All 19 figures generated successfully (16 original + 3 new)
+  Total output: ~2.5 MB
+  Average size: ~130 KB per figure
+  DPI: 150 (suitable for presentations)
+
+================================================================================
+USAGE
+================================================================================
+
+To regenerate all figures:
+  cd /sessions/pensive-clever-thompson/mnt/Project-Vortex/Presentation/Scripts
+  python3 run_all_figures.py
+
+To generate specific figures:
+  python3 01_trajectory_figures.py    # fig_02, fig_03
+  python3 02_optimization_figures.py  # fig_04
+  python3 03_demo_comparison_figures.py # fig_05, fig_11, fig_12
+  python3 04_architecture_diagrams.py # fig_01, fig_06, fig_07, fig_08, fig_13
+  python3 05_results_figures.py       # fig_09, fig_10, fig_14, fig_15, fig_16
+
+================================================================================
+TECHNICAL NOTES
+================================================================================
+
+- Matplotlib Style: seaborn-v0_8-whitegrid
+- Figure Resolution: DPI 150 (professional quality)
+- Color Scheme:
+  * Success/Good: #27ae60 (green)
+  * Failure/Bad: #e74c3c (red)
+  * Optimizer/Nominal: #3498db (blue)
+  * ML/Alternative: #f39c12 (orange)
+  * Hardware: #9b59b6 (purple)
+  * Neutral: #95a5a6 (gray)
+
+- Warnings Suppressed: matplotlib warnings filtered
+- Phase Colors (Trajectory):
+  * 0 (Ascent): #2ecc71 (bright green)
+  * 1 (Coast): #3498db (blue)
+  * 2 (Descent): #e74c3c (red)
+  * 3 (Burn): #c0392b (dark red)
+
+================================================================================

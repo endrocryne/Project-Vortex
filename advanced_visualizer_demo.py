@@ -454,7 +454,7 @@ class RocketVisualizerDemo(RocketVisualizer):
         title.setAlignment(Qt.AlignCenter)
         sidebar_layout.addWidget(title)
 
-        subtitle = QLabel("Velocity vs. Fault Intensity \u2014 seed=42")
+        subtitle = QLabel("Synthetic runs anchored to optimization_20260222_120325")
         subtitle.setFont(QFont("Segoe UI", 9))
         subtitle.setStyleSheet("color: #888888; background: transparent;")
         subtitle.setAlignment(Qt.AlignCenter)
@@ -526,8 +526,8 @@ class RocketVisualizerDemo(RocketVisualizer):
             ("faults", "Fault Types"),
             ("velocity", "Landing Vel"),
             ("distance", "Landing Dist"),
-            ("altitude", "Init Altitude"),
-            ("init_vel", "Init Velocity"),
+            ("altitude", "Apogee"),
+            ("init_vel", "Peak Vz"),
             ("mass", "Dry Mass"),
             ("thrust", "Avg Thrust"),
         ]
@@ -869,10 +869,10 @@ class RocketVisualizerDemo(RocketVisualizer):
         dist = run.get("landing_distance", 0)
         self._info_labels["distance"].setText(f"{dist:.1f} m")
 
-        alt = run.get("initial_altitude", 0)
+        alt = run.get("apogee", run.get("initial_altitude", 0))
         self._info_labels["altitude"].setText(f"{alt:.0f} m")
 
-        iv = run.get("initial_velocity", 0)
+        iv = run.get("peak_vertical_velocity", run.get("initial_velocity", 0))
         self._info_labels["init_vel"].setText(f"{iv:.1f} m/s")
 
         mass = run.get("dry_mass", 0)
@@ -946,7 +946,7 @@ class RocketVisualizerDemo(RocketVisualizer):
             "3D flight trajectory visualization\n\n"
             "9 curated demo runs showing Optimization vs. ML\n"
             "flight computer performance across fault intensities\n\n"
-            "Data from PlotVisual sample dataset (seed=42)\n\n"
+            "Synthetic data anchored to optimization_20260222_120325\n\n"
             "Based on HexaVisual v2.0\n"
             "\u00a9 2026 Agastya Mishra",
         )

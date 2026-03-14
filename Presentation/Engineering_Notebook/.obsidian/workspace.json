@@ -1,0 +1,234 @@
+{
+  "main": {
+    "id": "7599e3aabf5b1d13",
+    "type": "split",
+    "children": [
+      {
+        "id": "bc6718bfa54d679f",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "7e1b16a23b987ff1",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "Essentials.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "Essentials"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "21697548ce6b79e5",
+    "type": "split",
+    "children": [
+      {
+        "id": "7821c9797e279a9f",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "1caba8d15ca24cef",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false
+              },
+              "icon": "lucide-folder-closed",
+              "title": "Files"
+            }
+          },
+          {
+            "id": "0b8bf6b26ebdf480",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "Search"
+            }
+          },
+          {
+            "id": "f25e84a01747c2b5",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {},
+              "icon": "lucide-bookmark",
+              "title": "Bookmarks"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300
+  },
+  "right": {
+    "id": "fdd101fba5641e92",
+    "type": "split",
+    "children": [
+      {
+        "id": "0fcf735309e8b56b",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "aa074c0adf693c08",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "file": "04_HERMES_Framework.md",
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "Backlinks for 04_HERMES_Framework"
+            }
+          },
+          {
+            "id": "4e776b49d475bf81",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "file": "04_HERMES_Framework.md",
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "Outgoing links from 04_HERMES_Framework"
+            }
+          },
+          {
+            "id": "11cb33b9c6008cc4",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "Tags"
+            }
+          },
+          {
+            "id": "e01956b9be983ef9",
+            "type": "leaf",
+            "state": {
+              "type": "all-properties",
+              "state": {
+                "sortOrder": "frequency",
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-archive",
+              "title": "All properties"
+            }
+          },
+          {
+            "id": "bfc98e13bc271e5b",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "file": "04_HERMES_Framework.md",
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "Outline of 04_HERMES_Framework"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:Open quick switcher": false,
+      "graph:Open graph view": false,
+      "canvas:Create new canvas": false,
+      "daily-notes:Open today's daily note": false,
+      "templates:Insert template": false,
+      "command-palette:Open command palette": false,
+      "bases:Create new base": false
+    }
+  },
+  "active": "7e1b16a23b987ff1",
+  "lastOpenFiles": [
+    "04_ML_Model/ML_Model_Architecture.md",
+    "05_Results/10_Results_ML_Landing.md",
+    "05_Results/08_Results_Apogee_Two_Stage.md",
+    "Essentials.md",
+    "figures/fig_18_secondary_body.png",
+    "07_Conclusions/14_Conclusions_Future_Work.md",
+    "figures/fig_03_trajectory_baseline.png",
+    "figures/fig_19_ml_rockets_tested.png",
+    "figures/ML Testing with Multiple Rockets.png",
+    "05_Results/08_Results_Apogee_Two_Stage.md.tmp.34808.1773439191265",
+    "05_Results/08_Results_Apogee_Two_Stage.md.tmp.34808.1773439157312",
+    "05_Results/08_Results_Apogee_Two_Stage.md.tmp.34808.1773439120754",
+    "05_Results/08_Results_Apogee_Two_Stage.md.tmp.34808.1773439090646",
+    "Essentials.md.tmp.34808.1773439063093",
+    "05_Results/08_Results_Apogee_Two_Stage.md.tmp.34808.1773439053246",
+    "05_Results/08_Results_Apogee_Two_Stage.md.tmp.34808.1773439044169",
+    "05_Results/08_Results_Apogee_Two_Stage.md.tmp.34808.1773439032182",
+    "05_Results/08_Results_Apogee_Two_Stage.md.tmp.34808.1773439022908",
+    "05_Results/08_Results_Apogee_Two_Stage.md.tmp.34808.1773439014176",
+    "00_Index.md",
+    "README.md",
+    "figures/fig_04_success_rate_curve.png",
+    "figures/fig_05_demo_scenario_comparison.png",
+    "figures/fig_06_ekf_block_diagram.png",
+    "figures/fig_07_pid_block_diagram.png",
+    "figures/fig_08_fault_injection_diagram.png",
+    "figures/fig_09_two_stage_comparison.png",
+    "03_Methods/07_Methods_Fault_Injection.md",
+    "03_Methods/Core_Simulation_Engine.md",
+    "02_Framework/04_HERMES_Framework.md",
+    "03_Methods/05_Methods_Ignition_Optimizer.md",
+    "05_Methods_Ignition_Optimizer.md",
+    "07_Conclusions/13_Validation_Criteria.md",
+    "07_Conclusions/12_Constraints.md",
+    "06_Hardware/11_Final_Build_Avionics.md",
+    "05_Results/09_Results_Accuracy_Comparison.md",
+    "03_Methods/06_Methods_EKF_PID_Control.md",
+    "01_Introduction/03_Engineering_Objectives.md",
+    "01_Introduction/02_Background.md",
+    "01_Introduction/01_Introduction.md",
+    "04_HERMES_Framework.md",
+    "02_Background.md",
+    "01_Introduction.md",
+    "07_Methods_Fault_Injection.md",
+    "08_Results_Apogee_Two_Stage.md"
+  ]
+}
