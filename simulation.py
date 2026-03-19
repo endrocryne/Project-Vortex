@@ -594,6 +594,8 @@ class SuicideBurnSimulation:
         # Ensure fresh motor for every run
         from solid_motor import SolidMotor
         self.motor = SolidMotor(self.rocket_config)
+        # Resample per-run environmental Monte Carlo factors once per simulation
+        self.physics.resample_monte_carlo()
         
         # Results containers
         t_ascent = np.array([])
