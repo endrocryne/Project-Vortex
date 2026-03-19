@@ -118,6 +118,32 @@ plt.savefig('results/test_plot.png', dpi=100, bbox_inches='tight')
 plt.close()
 print("✓ Plot saved to results/test_plot.png")
 
+# Test 8: Monte Carlo factors should be stable within one run
+print("\n8. Testing Monte Carlo coefficient stability within a run...")
+env_config_stable = {
+    'gravity': 9.81,
+    'air_density': 1.225,
+    'temperature': 288.15,
+    'drag_coefficient': 0.5,
+    'reference_area': 0.07,
+    'wind_model': 'constant',
+    'wind_speed': 0.0,
+    'wind_direction': 0.0,
+    'drag_variation': 0.2,
+    'air_density_variation': 0.2
+}
+
+sim_stable = SuicideBurnSimulation(rocket_config, env_config_stable, {'altimeter_error': 0.0, 'velocity_sensor_error': 0.0})
+velocity = np.array([0.0, 0.0, -30.0])
+position = np.array([0.0, 0.0, 500.0])
+drag_1 = sim_stable.physics.get_drag_force(velocity, position, 1.0)
+drag_2 = sim_stable.physics.get_drag_force(velocity, position, 1.0)
+if np.allclose(drag_1, drag_2):
+    print("✓ Drag force is deterministic for repeated identical calls within one run")
+else:
+    print("✗ Drag force changed across repeated calls within one run")
+    raise RuntimeError("Monte Carlo coefficient instability detected")
+
 print("\n" + "=" * 60)
 print("ALL TESTS PASSED!")
 print("=" * 60)

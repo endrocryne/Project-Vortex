@@ -38,13 +38,23 @@ class PhysicsEngine:
         # Monte Carlo variation parameters
         self.drag_variation = config.get('drag_variation', 0.0)
         self.air_density_variation = config.get('air_density_variation', 0.0)
+        self.resample_monte_carlo()
+    
+    def resample_monte_carlo(self):
+        """
+        Sample per-run Monte Carlo factors.
+        Keep these constant during ODE integration to avoid injecting
+        high-frequency random forcing into the dynamics.
+        """
+        self.drag_variation_factor = 1.0 + np.random.uniform(-self.drag_variation, self.drag_variation)
+        self.air_density_variation_factor = 1.0 + np.random.uniform(-self.air_density_variation, self.air_density_variation)
         
     def get_air_density(self, altitude):
         """Calculate air density at given altitude using barometric formula"""
         # Scale height for exponential atmosphere model
         H = 8500  # meters
-        rho_variation = 1.0 + np.random.uniform(-self.air_density_variation, self.air_density_variation)
-        return self.rho_0 * np.exp(-altitude / H) * rho_variation
+        altitude = max(0.0, altitude)
+        return self.rho_0 * np.exp(-altitude / H) * self.air_density_variation_factor
     
     def get_wind_velocity(self, position, time):
         """Get wind velocity at given position and time"""
@@ -96,7 +106,7 @@ class PhysicsEngine:
             return np.zeros(3)
         
         # Drag force: F_d = 0.5 * rho * v^2 * Cd * A
-        Cd_actual = self.Cd * (1.0 + np.random.uniform(-self.drag_variation, self.drag_variation))
+        Cd_actual = self.Cd * self.drag_variation_factor
         drag_magnitude = 0.5 * rho * v_rel_mag**2 * Cd_actual * self.A_ref
         
         # Drag force opposes relative velocity
