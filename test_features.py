@@ -133,7 +133,8 @@ env_config_stable = {
     'air_density_variation': 0.2
 }
 
-sim_stable = SuicideBurnSimulation(rocket_config, env_config_stable, {'altimeter_error': 0.0, 'velocity_sensor_error': 0.0})
+sensor_config_no_errors = {'altimeter_error': 0.0, 'velocity_sensor_error': 0.0}
+sim_stable = SuicideBurnSimulation(rocket_config, env_config_stable, sensor_config_no_errors)
 velocity = np.array([0.0, 0.0, -30.0])
 position = np.array([0.0, 0.0, 500.0])
 drag_1 = sim_stable.physics.get_drag_force(velocity, position, 1.0)

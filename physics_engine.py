@@ -53,6 +53,7 @@ class PhysicsEngine:
         """Calculate air density at given altitude using barometric formula"""
         # Scale height for exponential atmosphere model
         H = 8500  # meters
+        # Clamp below-ground altitudes to sea-level for this simple atmosphere model.
         altitude = max(0.0, altitude)
         return self.rho_0 * np.exp(-altitude / H) * self.air_density_variation_factor
     

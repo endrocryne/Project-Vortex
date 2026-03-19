@@ -22,13 +22,13 @@ Where:
 
 ## 2) Atmospheric density (engineering approximation)
 
-Exponential model:
+Exponential model (for \(h \ge 0\)):
 
 \[
 \rho(h) = \rho_0 e^{-h/H}
 \]
 
-with scale height \(H \approx 8500\text{ m}\) and \(h \ge 0\).
+with scale height \(H \approx 8500\text{ m}\).
 
 ## 3) Wind models
 
