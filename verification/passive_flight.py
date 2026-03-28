@@ -7,7 +7,7 @@ This example demonstrates rocket behavior without active thrust vector control.
 
 import numpy as np
 import sys
-sys.path.insert(0, '..')
+sys.path.insert(0, '.')
 
 from tvc_simulation.rocket import Rocket
 from tvc_simulation.environment import Environment

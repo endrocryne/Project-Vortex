@@ -97,7 +97,7 @@ class GNC:
         
         derivative_pitch = (pitch_error - self.prev_error_pitch) / dt if dt > 0 else 0.0
         
-        gimbal_pitch = (
+        gimbal_pitch = -(
             self.kp_pitch * pitch_error +
             self.ki_pitch * self.integral_pitch +
             self.kd_pitch * derivative_pitch
@@ -110,7 +110,7 @@ class GNC:
         
         derivative_yaw = (yaw_error - self.prev_error_yaw) / dt if dt > 0 else 0.0
         
-        gimbal_yaw = (
+        gimbal_yaw = -(
             self.kp_yaw * yaw_error +
             self.ki_yaw * self.integral_yaw +
             self.kd_yaw * derivative_yaw
