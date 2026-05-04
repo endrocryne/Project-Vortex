@@ -44,6 +44,16 @@ SOLID_MOTOR_BURNOUT_TIME = 1.7
 MASS_LOSS_RAMP_TIME = 0.35
 BASELINE_IGNITION_ALTITUDE = 36.11
 
+# Freefall sub-phases
+PHASE_TUMBLING = 5    # aerodynamic tumble nose-down
+PHASE_NOSE_DOWN = 6   # stable nose-down freefall
+PHASE_RCS_FLIP = 7    # cold-gas thruster flip back to upright
+
+FREEFALL_TUMBLE_DELAY = 0.25   # s after apogee before tumble starts
+FREEFALL_TUMBLE_DUR = 1.65     # s for aerodynamic 0° → 180° tumble
+RCS_FLIP_DUR = 1.80            # s for RCS 180° → 0° controlled flip
+RCS_FLIP_MARGIN = 0.15         # s before ignition to be upright
+
 FIELDNAMES = [
     "Time",
     "X",
@@ -394,11 +404,49 @@ def quat_normalize(quaternion: Tuple[float, float, float, float]) -> Tuple[float
     return qw / magnitude, qx / magnitude, qy / magnitude, qz / magnitude
 
 
+quaternion_normalize = quat_normalize
+
+
 def quaternion_from_tilt(tilt_x_deg: float, tilt_y_deg: float, yaw_deg: float = 0.0) -> Tuple[float, float, float, float]:
     roll = quat_axis_angle((1.0, 0.0, 0.0), math.radians(tilt_y_deg))
     pitch = quat_axis_angle((0.0, 1.0, 0.0), math.radians(-tilt_x_deg))
     yaw = quat_axis_angle((0.0, 0.0, 1.0), math.radians(yaw_deg))
     return quat_normalize(quat_multiply(yaw, quat_multiply(pitch, roll)))
+
+
+def freefall_timing(apogee_time: float, ignition_time: float) -> Dict[str, float]:
+    """Compute the start/end times for each freefall sub-phase."""
+    freefall_dur = max(ignition_time - apogee_time, 1.0)
+    tumble_start = apogee_time + FREEFALL_TUMBLE_DELAY
+    tumble_end = tumble_start + min(FREEFALL_TUMBLE_DUR, freefall_dur * 0.38)
+    rcs_end = ignition_time - RCS_FLIP_MARGIN
+    rcs_dur = min(RCS_FLIP_DUR, freefall_dur * 0.42)
+    rcs_start = rcs_end - rcs_dur
+    if rcs_start < tumble_end:
+        rcs_start = tumble_end + 0.05
+    return {
+        "tumble_start": tumble_start,
+        "tumble_end": tumble_end,
+        "rcs_start": rcs_start,
+        "rcs_end": rcs_end,
+    }
+
+
+def flip_axis_for_scenario(scenario: Scenario) -> Tuple[float, float, float]:
+    """Horizontal unit vector perpendicular to wind direction — the tumble rotation axis."""
+    heading = math.radians(scenario.wind_heading_deg)
+    return (-math.sin(heading), math.cos(heading), 0.0)
+
+
+def quaternion_from_nose_angle(angle_rad: float, axis: Tuple[float, float, float]) -> Tuple[float, float, float, float]:
+    """Quaternion for rotating nose from upright (angle=0) to nose-down (angle=π) around axis.
+    Uses Rodrigues formula: starting from [0,0,1] (nose-up), rotate around horizontal axis.
+    Returns (qw, qx, qy, qz).
+    """
+    ax, ay, az = axis  # horizontal unit vector, az=0
+    half = 0.5 * angle_rad
+    s = math.sin(half)
+    return (math.cos(half), ax * s, ay * s, az * s)
 
 
 def load_reference() -> Dict[str, object]:
@@ -659,13 +707,28 @@ def ml_ignition_adjustment(scenario: Scenario, plan: Dict[str, float]) -> float:
     return clamp(wind_term + drag_term + mass_term, -6.0, 8.0)
 
 
-def phase_at_time(time_value: float, ascent_end: float, apogee_time: float, ignition_time: float, landing_time: float) -> int:
+def phase_at_time(
+    time_value: float,
+    ascent_end: float,
+    apogee_time: float,
+    ignition_time: float,
+    landing_time: float,
+    ff_timing: Dict[str, float],
+) -> int:
     if time_value < ascent_end:
         return 0
     if time_value < apogee_time:
         return 1
-    if time_value < ignition_time:
+    if time_value < ff_timing["tumble_start"]:
         return 2
+    if time_value < ff_timing["tumble_end"]:
+        return PHASE_TUMBLING
+    if time_value < ff_timing["rcs_start"]:
+        return PHASE_NOSE_DOWN
+    if time_value < ff_timing["rcs_end"]:
+        return PHASE_RCS_FLIP
+    if time_value < ignition_time:
+        return 2  # brief upright wait before ignition
     if time_value < landing_time:
         return 3
     return 4
@@ -1052,9 +1115,11 @@ def synthesize_run(reference: Dict[str, object], scenario: Scenario) -> Tuple[Li
 
     records: List[Dict[str, float]] = []
     current_time = 0.0
+    ff_timing = freefall_timing(apogee_time, ignition_time)
+    tumble_axis = flip_axis_for_scenario(scenario)
 
     while current_time < landing_time - 1e-9:
-        phase = phase_at_time(current_time, ascent_end, apogee_time, ignition_time, landing_time)
+        phase = phase_at_time(current_time, ascent_end, apogee_time, ignition_time, landing_time, ff_timing)
 
         if current_time <= apogee_time:
             z_value, vz_value = ascent_state(reference, current_time)
@@ -1090,11 +1155,27 @@ def synthesize_run(reference: Dict[str, object], scenario: Scenario) -> Tuple[Li
             )
         wind_x, wind_y = wind_at_time(current_time, fault_start, ignition_time, scenario)
         ml_value = ml_correction_at_time(current_time, fault_start, ignition_time, resolved_scenario)
-        if tilt_override is None:
+        if tilt_override is not None:
+            quaternion = quaternion_from_tilt(tilt_override[0], tilt_override[1])
+        elif phase == PHASE_TUMBLING:
+            u = clamp((current_time - ff_timing["tumble_start"]) / max(ff_timing["tumble_end"] - ff_timing["tumble_start"], 1e-6), 0.0, 1.0)
+            angle = math.pi * smoothstep(u)
+            quaternion = quaternion_normalize(quaternion_from_nose_angle(angle, tumble_axis))
+        elif phase == PHASE_NOSE_DOWN:
+            t_nd = current_time - ff_timing["tumble_end"]
+            wobble = 0.04 * math.sin(1.8 * t_nd) * math.exp(-0.5 * t_nd)
+            angle = math.pi + wobble
+            quaternion = quaternion_normalize(quaternion_from_nose_angle(angle, tumble_axis))
+        elif phase == PHASE_RCS_FLIP:
+            dur = max(ff_timing["rcs_end"] - ff_timing["rcs_start"], 1e-6)
+            u = clamp((current_time - ff_timing["rcs_start"]) / dur, 0.0, 1.0)
+            angle = math.pi * (1.0 - smoothstep(u))
+            quaternion = quaternion_normalize(quaternion_from_nose_angle(angle, tumble_axis))
+        else:
             tilt_x, tilt_y = tilt_state(
                 phase,
                 current_time,
-            ascent_end,
+                ascent_end,
                 ignition_time,
                 landing_time,
                 x_value,
@@ -1105,9 +1186,7 @@ def synthesize_run(reference: Dict[str, object], scenario: Scenario) -> Tuple[Li
                 ay_value,
                 scenario,
             )
-        else:
-            tilt_x, tilt_y = tilt_override
-        quaternion = quaternion_from_tilt(tilt_x, tilt_y)
+            quaternion = quaternion_from_tilt(tilt_x, tilt_y)
         mass_value = mass_at_time(current_time, reference, fault_start, resolved_scenario, ignition_time, landing_time)
 
         active_fault_code = fault_id if fault_start <= current_time < ignition_time else 0
@@ -1242,7 +1321,13 @@ def validate_run(records: Sequence[Dict[str, float]], scenario: Scenario) -> Non
         mass_delta = current["Mass"] - previous["Mass"]
         if mass_delta > 1e-6:
             raise RuntimeError(f"Mass increased in {scenario.run_id}")
-        mass_loss_coast = "MASS_LOSS" in scenario.fault_types and previous["Phase"] in (1, 2) and current["Phase"] in (1, 2) and (previous["FaultType"] in (3, 4) or current["FaultType"] in (3, 4))
+        coast_phases = (1, 2, PHASE_TUMBLING, PHASE_NOSE_DOWN, PHASE_RCS_FLIP)
+        mass_loss_coast = (
+            "MASS_LOSS" in scenario.fault_types
+            and previous["Phase"] in coast_phases
+            and current["Phase"] in coast_phases
+            and (previous["FaultType"] in (3, 4) or current["FaultType"] in (3, 4))
+        )
         if abs(mass_delta) > 1e-6 and previous["Phase"] not in (0, 3) and current["Phase"] not in (0, 3) and not mass_loss_coast:
             raise RuntimeError(f"Mass changed outside burn phase in {scenario.run_id}")
         if current["Z"] < -1e-6:
@@ -1264,7 +1349,7 @@ def validate_run(records: Sequence[Dict[str, float]], scenario: Scenario) -> Non
         elif phase == 3:
             max_descent_tilt = max(max_descent_tilt, tilt_deg)
             last_powered_tilt = tilt_deg
-        if tilt_deg >= 90.0:
+        if tilt_deg >= 90.0 and phase not in (PHASE_TUMBLING, PHASE_NOSE_DOWN, PHASE_RCS_FLIP):
             raise RuntimeError(f"Vehicle inverted in {scenario.run_id}")
 
     if max_velocity_error > 12.0:
@@ -1371,7 +1456,7 @@ def generate_demo_runs() -> Dict[str, object]:
     manifest = {
         "version": "3.1",
         "generated": "2026-03-11",
-        "description": "Synthetic demo trajectories anchored to optimization_20260222_120325 with upright freefall, fixed solid-motor descent burn duration, and TVC-active powered phases only.",
+        "description": "Synthetic demo trajectories with physics-based nose-down freefall (aerodynamic tumble after apogee) and cold-gas RCS flip maneuver before the solid-motor landing burn.",
         "runs": [],
     }
 

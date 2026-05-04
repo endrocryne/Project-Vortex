@@ -1020,128 +1020,222 @@ class RocketVisualizerDemo(RocketVisualizer):
         self._pose_smooth_pos = None
         self._display_rot_matrix = None
         self._apogee_frame = None
+        self._ignition_frame = None
+        self._tumble_flip_axis = None
         self._landing_burn_start_frame = None
         self.update_scene()
 
     def _compute_display_rotation(self):
-        """Build rocket orientation: nose-up during ascent, nose-down during coast/descent,
-        then a rapid TVC flip back to nose-up once the landing burn ignites."""
+        """Physics-based rocket orientation with nose-down freefall and RCS flip.
+
+        Timeline (all times relative to loaded trajectory):
+          - Ascent burn: follows thrust vector
+          - Pre-apogee coast: gentle upright lean
+          - After apogee (TUMBLE_DELAY): aerodynamic tumble 0° → 180° over ~1.65 s
+            Physics: rocket falling tail-first is aerodynamically unstable;
+            CP is ahead of CG → torque flips it nose-down
+          - Stable nose-down: inverted (~180°) with small aerodynamic oscillation
+          - RCS flip (starts ~1.95 s before ignition): cold-gas thrusters rotate
+            180° → 0° before main motor ignites
+          - Landing burn: nose-up, small TVC lean
+        """
         if self.df is None or len(self.df) < 2:
             return np.eye(3)
 
+        row = self.df.iloc[self.current_frame]
         lat_scale = self._get_lat_scale()
         vert_scale = self._get_vert_scale()
-        row = self.df.iloc[self.current_frame]
 
-        # Detect burn state
+        # --- Cache key frame indices ---
+        if not hasattr(self, '_apogee_frame') or self._apogee_frame is None:
+            self._apogee_frame = int(self.df['Z'].idxmax()) if 'Z' in self.df.columns else 0
+
+        if not hasattr(self, '_ignition_frame') or self._ignition_frame is None:
+            self._ignition_frame = len(self.df) - 1
+            if 'Mass' in self.df.columns:
+                apg = self._apogee_frame
+                for i in range(apg, len(self.df) - 1):
+                    if float(self.df.iloc[i + 1]['Mass']) < float(self.df.iloc[i]['Mass']) - 1e-9:
+                        self._ignition_frame = i
+                        break
+
+        # --- Cache tumble flip axis from lateral velocity near apogee ---
+        if not hasattr(self, '_tumble_flip_axis') or self._tumble_flip_axis is None:
+            apg = self._apogee_frame
+            sample_f = min(apg + max(1, int(round(0.4 / max(self.time_step, 1e-9)))), len(self.df) - 1)
+            vx_s = float(self.df.iloc[sample_f].get('VX', 0.0))
+            vy_s = float(self.df.iloc[sample_f].get('VY', 0.0))
+            lat_mag = math.sqrt(vx_s * vx_s + vy_s * vy_s)
+            if lat_mag > 0.05:
+                self._tumble_flip_axis = np.array([-vy_s / lat_mag, vx_s / lat_mag, 0.0])
+            else:
+                self._tumble_flip_axis = np.array([0.0, 1.0, 0.0])
+
+        flip_axis = self._tumble_flip_axis
+        fx, fy = flip_axis[0], flip_axis[1]
+
+        # --- Timing ---
+        apogee_t = float(self.df.iloc[self._apogee_frame]['Time'])
+        ignition_t = float(self.df.iloc[self._ignition_frame]['Time'])
+        freefall_dur = max(ignition_t - apogee_t, 1.0)
+        curr_t = float(row['Time'])
+
+        TUMBLE_DELAY = 0.25
+        TUMBLE_DUR = min(1.65, freefall_dur * 0.38)
+        RCS_DUR = min(1.80, freefall_dur * 0.42)
+        RCS_MARGIN = 0.15
+
+        tumble_start_t = apogee_t + TUMBLE_DELAY
+        tumble_end_t = tumble_start_t + TUMBLE_DUR
+        rcs_end_t = ignition_t - RCS_MARGIN
+        rcs_start_t = rcs_end_t - RCS_DUR
+        if rcs_start_t < tumble_end_t:
+            rcs_start_t = tumble_end_t + 0.05
+
+        # --- Flight state flags ---
+        is_ascending = self.current_frame <= self._apogee_frame
         is_burning = False
-        if self.current_frame > 0 and "Mass" in self.df.columns:
-            m_prev = float(self.df.iloc[self.current_frame - 1]["Mass"])
-            m_curr = float(row["Mass"])
+        if self.current_frame > 0 and 'Mass' in self.df.columns:
+            m_prev = float(self.df.iloc[self.current_frame - 1]['Mass'])
+            m_curr = float(row['Mass'])
             is_burning = m_curr < m_prev - 1e-9
+        is_landing_burn = is_burning and not is_ascending
 
-        # Detect which burn phase we're in
-        vz = float(row.get("VZ", 0.0))
-        z_val = float(row.get("Z", 0.0))
-
-        # Find apogee frame (cached)
-        if not hasattr(self, "_apogee_frame") or self._apogee_frame is None:
-            self._apogee_frame = int(self.df["Z"].idxmax()) if "Z" in self.df.columns else 0
-
-        is_ascent = self.current_frame <= self._apogee_frame
-        is_landing_burn = is_burning and not is_ascent
-
-        # Compute trajectory tangent over a fixed ~100 ms time window so that
-        # orientation smoothing is independent of the data resolution/upsample factor.
-        span_time = 0.10  # seconds of sim time to look ahead/behind for tangent
-        span = max(2, int(round(span_time / max(self.time_step, 1e-9))))
+        # --- Trajectory tangent for lateral lean ---
+        span = max(2, int(round(0.10 / max(self.time_step, 1e-9))))
         i0 = max(0, self.current_frame - span)
         i1 = min(len(self.df) - 1, self.current_frame + span)
         if i0 == i1:
             i1 = min(len(self.df) - 1, i0 + 1)
-
-        p0 = np.array([
-            float(self.df.iloc[i0]["X"]) * lat_scale,
-            float(self.df.iloc[i0]["Y"]) * lat_scale,
-            float(self.df.iloc[i0]["Z"]) * vert_scale,
+        p0_t = np.array([
+            float(self.df.iloc[i0]['X']) * lat_scale,
+            float(self.df.iloc[i0]['Y']) * lat_scale,
+            float(self.df.iloc[i0]['Z']) * vert_scale,
         ])
-        p1 = np.array([
-            float(self.df.iloc[i1]["X"]) * lat_scale,
-            float(self.df.iloc[i1]["Y"]) * lat_scale,
-            float(self.df.iloc[i1]["Z"]) * vert_scale,
+        p1_t = np.array([
+            float(self.df.iloc[i1]['X']) * lat_scale,
+            float(self.df.iloc[i1]['Y']) * lat_scale,
+            float(self.df.iloc[i1]['Z']) * vert_scale,
         ])
-
-        tangent = p1 - p0
+        tangent = p1_t - p0_t
         tangent_norm = np.linalg.norm(tangent)
         if tangent_norm < 1e-6:
             return self._display_rot_matrix if self._display_rot_matrix is not None else np.eye(3)
-
         tangent_dir = tangent / tangent_norm
-
-        # The rocket is always nose-up (nozzle at bottom) for the entire flight.
-        # lateral drift gives a small realistic tilt; the vertical component is
-        # always forced positive so the nose never points downward.
-
-        # Decompose tangent into lateral and vertical components
         lateral_xy = np.array([tangent_dir[0], tangent_dir[1], 0.0])
         lat_norm = np.linalg.norm(lateral_xy)
-        if lat_norm > 1e-6:
-            lateral_unit = lateral_xy / lat_norm
-        else:
-            lateral_unit = np.array([0.0, 0.0, 0.0])
+        lateral_unit = lateral_xy / lat_norm if lat_norm > 1e-6 else np.array([0.0, 0.0, 0.0])
 
-        if is_landing_burn:
-            # Active TVC: nose locked upright, small lean into drift direction
+        # --- Smoothstep helper ---
+        def ss(u: float) -> float:
+            u = max(0.0, min(1.0, u))
+            return u * u * (3.0 - 2.0 * u)
+
+        # --- Rodrigues rotation of nose [0,0,1] around flip_axis by angle theta ---
+        def nose_from_angle(theta: float) -> np.ndarray:
+            s_t = math.sin(theta)
+            c_t = math.cos(theta)
+            return np.array([fy * s_t, -fx * s_t, c_t])
+
+        # --- Determine z_axis (nose direction) and alpha (smoothing speed) ---
+        during_flip = (tumble_start_t <= curr_t < ignition_t) and not is_landing_burn and not is_ascending
+
+        if is_ascending or curr_t < apogee_t:
+            if is_burning:
+                z_axis = tangent_dir.copy()
+                if z_axis[2] < 0.1:
+                    z_axis[2] = 0.1
+                alpha = 0.45
+            else:
+                z_axis = np.array([0.0, 0.0, 1.0]) + lateral_unit * min(0.10, lat_norm * 0.18)
+                alpha = 0.18
+            self._landing_burn_start_frame = None
+
+        elif curr_t < tumble_start_t:
+            z_axis = np.array([0.0, 0.0, 1.0]) + lateral_unit * min(0.06, lat_norm * 0.12)
+            alpha = 0.12
+            self._landing_burn_start_frame = None
+
+        elif curr_t < tumble_end_t:
+            u = (curr_t - tumble_start_t) / max(TUMBLE_DUR, 1e-6)
+            theta = math.pi * ss(u)
+            z_axis = nose_from_angle(theta)
+            lean_fade = 1.0 - abs(math.cos(theta)) * 0.7
+            z_axis += lateral_unit * min(0.07, lat_norm * 0.11) * lean_fade
+            alpha = 0.65
+            self._landing_burn_start_frame = None
+
+        elif curr_t < rcs_start_t:
+            t_nd = curr_t - tumble_end_t
+            wobble = 0.035 * math.sin(1.8 * t_nd) * math.exp(-0.4 * t_nd)
+            theta = math.pi + wobble
+            z_axis = nose_from_angle(theta)
+            z_axis += lateral_unit * min(0.07, lat_norm * 0.11)
+            alpha = 0.14
+            self._landing_burn_start_frame = None
+
+        elif curr_t < ignition_t:
+            u = (curr_t - rcs_start_t) / max(rcs_end_t - rcs_start_t, 1e-6)
+            theta = math.pi * (1.0 - ss(u))
+            z_axis = nose_from_angle(theta)
+            lean_fade = theta / math.pi
+            z_axis += lateral_unit * min(0.06, lat_norm * 0.10) * lean_fade
+            alpha = 0.70
+            self._landing_burn_start_frame = None
+
+        elif is_landing_burn:
             tilt_amount = min(0.12, lat_norm * 0.25)
             z_axis = np.array([0.0, 0.0, 1.0]) + lateral_unit * tilt_amount
             alpha = 0.55
             self._landing_burn_start_frame = self._landing_burn_start_frame or self.current_frame
-        elif is_ascent and is_burning:
-            # Ascent burn: follow upward velocity closely, allow natural tilt
-            z_axis = tangent_dir.copy()
-            if z_axis[2] < 0.1:
-                z_axis[2] = 0.1          # never let nose dip below ~84° from horizontal
-            alpha = 0.45
-            self._landing_burn_start_frame = None
+
         else:
-            # Coast (both up and down): nose stays up with gentle lateral lean.
-            # tilt magnitude scales with how much horizontal drift there is.
             tilt_amount = min(0.10, lat_norm * 0.18)
             z_axis = np.array([0.0, 0.0, 1.0]) + lateral_unit * tilt_amount
-            alpha = 0.18
+            alpha = 0.25
             self._landing_burn_start_frame = None
 
+        # --- Normalize nose direction ---
         z_norm = np.linalg.norm(z_axis)
         if z_norm < 1e-6:
             z_axis = np.array([0.0, 0.0, 1.0])
         else:
             z_axis = z_axis / z_norm
 
-        # Build rotation matrix from z_axis (nose direction)
-        # Pick a reference "world right" that avoids the degenerate case where
-        # z_axis is exactly vertical (cross product → zero).
-        if abs(z_axis[2]) > 0.999:
-            ref = np.array([1.0, 0.0, 0.0])
+        # --- Build rotation matrix ---
+        if during_flip:
+            x_axis = flip_axis.copy()
+            y_axis = np.cross(z_axis, x_axis)
+            y_norm = np.linalg.norm(y_axis)
+            if y_norm < 1e-6:
+                y_axis = np.array([0.0, 0.0, 1.0]) if abs(z_axis[2]) < 0.9 else np.array([1.0, 0.0, 0.0])
+            else:
+                y_axis = y_axis / y_norm
+            x_axis = np.cross(y_axis, z_axis)
+            x_norm = np.linalg.norm(x_axis)
+            if x_norm < 1e-6:
+                x_axis = flip_axis.copy()
+            else:
+                x_axis = x_axis / x_norm
         else:
-            ref = np.array([0.0, 0.0, 1.0])
-
-        x_axis = np.cross(ref, z_axis)
-        x_norm = np.linalg.norm(x_axis)
-        if x_norm < 1e-6:
-            x_axis = np.array([1.0, 0.0, 0.0])
-        else:
-            x_axis = x_axis / x_norm
-
-        y_axis = np.cross(z_axis, x_axis)
-        y_norm = np.linalg.norm(y_axis)
-        if y_norm < 1e-6:
-            y_axis = np.array([0.0, 1.0, 0.0])
-        else:
-            y_axis = y_axis / y_norm
+            if abs(z_axis[2]) > 0.999:
+                ref = np.array([1.0, 0.0, 0.0])
+            else:
+                ref = np.array([0.0, 0.0, 1.0])
+            x_axis = np.cross(ref, z_axis)
+            x_norm = np.linalg.norm(x_axis)
+            if x_norm < 1e-6:
+                x_axis = np.array([1.0, 0.0, 0.0])
+            else:
+                x_axis = x_axis / x_norm
+            y_axis = np.cross(z_axis, x_axis)
+            y_norm = np.linalg.norm(y_axis)
+            if y_norm < 1e-6:
+                y_axis = np.array([0.0, 1.0, 0.0])
+            else:
+                y_axis = y_axis / y_norm
 
         target_rot = np.column_stack([x_axis, y_axis, z_axis])
-
-        # Ensure target_rot is a proper rotation matrix
         if np.linalg.det(target_rot) < 0:
             target_rot[:, 2] = -target_rot[:, 2]
 
@@ -1150,16 +1244,61 @@ class RocketVisualizerDemo(RocketVisualizer):
             return target_rot
 
         blended = (1.0 - alpha) * self._display_rot_matrix + alpha * target_rot
-        u, _, vt = np.linalg.svd(blended)
-        smoothed = u @ vt
-        
-        # Ensure smoothed matrix has determinant +1 to prevent 180-degree flipping (mirroring)
+        u_svd, _, vt = np.linalg.svd(blended)
+        smoothed = u_svd @ vt
         if np.linalg.det(smoothed) < 0:
-            u[:, 2] = -u[:, 2]
-            smoothed = u @ vt
-            
+            u_svd[:, 2] = -u_svd[:, 2]
+            smoothed = u_svd @ vt
+
         self._display_rot_matrix = smoothed
         return smoothed
+
+    def _update_hud(self, row, is_burning, is_crashed):
+        """Update HUD with flight-phase-aware status labels."""
+        super()._update_hud(row, is_burning, is_crashed)
+
+        if is_crashed or is_burning:
+            return
+
+        curr_t = float(row.get('Time', 0.0))
+
+        apogee_t = float(self.df.iloc[self._apogee_frame]['Time']) if (self.df is not None and self._apogee_frame is not None) else 0.0
+        ignition_t = float(self.df.iloc[self._ignition_frame]['Time']) if (self.df is not None and self._ignition_frame is not None) else 1e9
+        freefall_dur = max(ignition_t - apogee_t, 1.0)
+
+        TUMBLE_DELAY = 0.25
+        TUMBLE_DUR = min(1.65, freefall_dur * 0.38)
+        RCS_DUR = min(1.80, freefall_dur * 0.42)
+        RCS_MARGIN = 0.15
+        tumble_start_t = apogee_t + TUMBLE_DELAY
+        tumble_end_t = tumble_start_t + TUMBLE_DUR
+        rcs_end_t = ignition_t - RCS_MARGIN
+        rcs_start_t = rcs_end_t - RCS_DUR
+        if rcs_start_t < tumble_end_t:
+            rcs_start_t = tumble_end_t + 0.05
+
+        is_ascending = self.current_frame <= self._apogee_frame if self._apogee_frame is not None else True
+
+        if is_ascending or curr_t <= apogee_t:
+            return
+
+        if curr_t < tumble_start_t:
+            label, color = "STATUS: COAST", "#00BFFF"
+        elif curr_t < tumble_end_t:
+            label, color = "STATUS: TUMBLING", "#FF6600"
+        elif curr_t < rcs_start_t:
+            label, color = "STATUS: NOSE-DOWN", "#FF4400"
+        elif curr_t < ignition_t:
+            label, color = "STATUS: RCS FLIP", "#FFDD00"
+        else:
+            return
+
+        if hasattr(self, 'hud_status'):
+            self.hud_status.setText(label)
+            self.hud_status.setStyleSheet(
+                f"color: {color}; background-color: rgba(0,0,0,160); "
+                f"padding: 2px 6px; border-radius: 3px;"
+            )
 
     def _update_fault_effects_animation(self, row, pos, rot_matrix):
         """Animate wind streaks and mass-loss events for active demo faults."""
