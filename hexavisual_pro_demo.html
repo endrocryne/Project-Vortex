@@ -1192,7 +1192,7 @@ const SECONDARY_BODY = [
 const SEC_SEPARATION_TIME = 5.8;
 
 
-const COLS = {T:0,X:1,Y:2,Z:3,VX:4,VY:5,VZ:6,QW:7,QX:8,QY:9,QZ:10,M:11,MLC:12,FT:13,FM:14,WX:15,WY:16,PH:17};
+const COLS = {T:0,X:1,Y:2,Z:3,VX:4,VY:5,VZ:6,QW:7,QX:8,QY:9,QZ:10,M:11,MLC:12,FT:13,FM:14,WX:15,WY:16,PH:17,RCS_PP:18,RCS_PN:19,RCS_YP:20,RCS_YN:21};
 
 // ═══════════════════════════════════════════════════════════════
 // THREE.JS IMPORTS
@@ -1863,6 +1863,34 @@ function emitParticle(origin, rocketQuat) {
   particleSizes[i] = 0.4 + Math.random() * 0.3;
 }
 
+function emitRCSParticle(origin, localDir, rocketQuat) {
+  const i = nextParticle;
+  nextParticle = (nextParticle + 1) % MAX_PARTICLES;
+
+  const spread = 0.4;
+  const dir = localDir.clone();
+  dir.x += (Math.random() - 0.5) * spread;
+  dir.y += (Math.random() - 0.5) * spread;
+  dir.z += (Math.random() - 0.5) * spread;
+  dir.normalize();
+
+  dir.applyQuaternion(rocketQuat);
+  dir.multiplyScalar(4 + Math.random() * 3);
+
+  particlePositions[i * 3]     = origin.x;
+  particlePositions[i * 3 + 1] = origin.y;
+  particlePositions[i * 3 + 2] = origin.z;
+  particleVelocities[i].copy(dir);
+  particleAges[i] = 0;
+  particleAlive[i] = 1;
+  // Cyan/White for cold gas
+  particleColors[i * 4]     = 0.7;
+  particleColors[i * 4 + 1] = 0.9;
+  particleColors[i * 4 + 2] = 1.0;
+  particleColors[i * 4 + 3] = 0.8;
+  particleSizes[i] = 0.2 + Math.random() * 0.2;
+}
+
 function updateParticles(dt) {
   for (let i = 0; i < MAX_PARTICLES; i++) {
     if (!particleAlive[i]) continue;
@@ -2226,6 +2254,12 @@ function sampleTrajectory(traj, time) {
   // Detect motor burn from Phase column: 0=ascent_burn, 3=descent_burn
   const isBurning = (phase === 0 || phase === 3);
 
+  // RCS columns
+  const rcsPP = r2[COLS.RCS_PP] || 0;
+  const rcsPN = r2[COLS.RCS_PN] || 0;
+  const rcsYP = r2[COLS.RCS_YP] || 0;
+  const rcsYN = r2[COLS.RCS_YN] || 0;
+
   // SLERP quaternion
   const q = slerpQuat(
     [r1[COLS.QW], r1[COLS.QX], r1[COLS.QY], r1[COLS.QZ]],
@@ -2234,7 +2268,8 @@ function sampleTrajectory(traj, time) {
   );
 
   return { t, x, y, z, vx, vy, vz, mass, quat: q, isBurning,
-           mlCorrection, faultType, faultMag, windX, windY, phase };
+           mlCorrection, faultType, faultMag, windX, windY, phase,
+           rcsPP, rcsPN, rcsYP, rcsYN };
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -2426,6 +2461,8 @@ window.setLightMode = function(enabled) {
 // ═══════════════════════════════════════════════════════════════
 // CAMERA MODES
 // ═══════════════════════════════════════════════════════════════
+window.updateTimeDisplay = updateTimeDisplay;
+
 window.setCameraMode = function(mode) {
   state.cameraMode = mode;
   const label = mode === 'chase' ? 'Chase Cam' : mode === 'orbit' ? 'Orbit Cam' : 'Free Cam';
@@ -2527,19 +2564,24 @@ document.getElementById('csv-upload').addEventListener('change', (e) => {
     const lines = text.trim().split('\n');
     if (lines.length < 2) return;
     const header = lines[0].split(',').map(h => h.trim());
-    const reqCols = ['Time','X','Y','Z','VX','VY','VZ','QW','QX','QY','QZ','Mass'];
+    const reqCols = ['Time','X','Y','Z','VX','VY','VZ','QW','QX','QY','QZ','Mass','MLC','FT','FM','WX','WY','PH','RCS_PP','RCS_PN','RCS_YP','RCS_YN'];
     const colMap = {};
     reqCols.forEach(c => { colMap[c] = header.indexOf(c); });
-    if (Object.values(colMap).some(v => v === -1)) {
-      alert('CSV must have columns: ' + reqCols.join(', '));
+
+    // Check essential columns
+    const essential = ['Time','X','Y','Z','QW','QX','QY','QZ'];
+    if (essential.some(c => colMap[c] === -1)) {
+      alert('CSV must have at least: ' + essential.join(', '));
       return;
     }
 
     const rows = [];
     for (let i = 1; i < lines.length; i++) {
       const vals = lines[i].split(',').map(Number);
-      if (vals.length < 12) continue;
-      rows.push(reqCols.map(c => vals[colMap[c]]));
+      if (vals.length < 8) continue;
+      // Fill missing columns with 0
+      const row = reqCols.map(c => (colMap[c] !== -1 && colMap[c] < vals.length) ? vals[colMap[c]] : 0);
+      rows.push(row);
     }
 
     const customId = 'custom_' + Date.now();
@@ -2813,6 +2855,29 @@ function animate() {
       nozzleWorld.applyQuaternion(rocketGroup.quaternion);
       nozzleWorld.add(rocketGroup.position);
       for (let p = 0; p < 6; p++) emitParticle(nozzleWorld, rocketGroup.quaternion);
+    }
+
+    // RCS Emission
+    if (state.playing) {
+      const rcsData = [sample.rcsPP, sample.rcsPN, sample.rcsYP, sample.rcsYN];
+      const thrusterLocs = [
+        new THREE.Vector3(0.15, 2.0, 0),
+        new THREE.Vector3(-0.15, 2.0, 0),
+        new THREE.Vector3(0, 2.0, 0.15),
+        new THREE.Vector3(0, 2.0, -0.15)
+      ];
+      const thrusterDirs = [
+        new THREE.Vector3(1, 0, 0),
+        new THREE.Vector3(-1, 0, 0),
+        new THREE.Vector3(0, 0, 1),
+        new THREE.Vector3(0, 0, -1)
+      ];
+      for (let i = 0; i < 4; i++) {
+        if (rcsData[i] > 0.1) {
+          const tWorld = thrusterLocs[i].clone().applyQuaternion(rocketGroup.quaternion).add(rocketGroup.position);
+          emitRCSParticle(tWorld, thrusterDirs[i], rocketGroup.quaternion);
+        }
+      }
     }
 
     // Trail
