@@ -213,8 +213,17 @@ def run_single_simulation(config_file=None, sim_overrides=None):
     filename = os.path.join(results_dir, 'single_run.csv')
     with open(filename, 'w', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow(['Time', 'X', 'Y', 'Z', 'VX', 'VY', 'VZ', 'QW', 'QX', 'QY', 'QZ', 'Mass'])
+        # Format for HexaVisual Pro / Flight Data Viewer
+        writer.writerow(['Time', 'X', 'Y', 'Z', 'VX', 'VY', 'VZ', 'QW', 'QX', 'QY', 'QZ', 'Mass', 'MLC', 'FT', 'FM', 'WX', 'WY', 'PH', 'RCS_PP', 'RCS_PN', 'RCS_YP', 'RCS_YN'])
         for i in range(len(history['t'])):
+            # Determine Phase (PH) for viewer: 0=ascent burn, 3=descent burn, 1=freefall/flip
+            thrust = history['thrust'][i]
+            alt = history['z'][i]
+            phase = 1 # Default freefall
+            if thrust > 10:
+                if alt > 100: phase = 0 # Ascent
+                else: phase = 3 # Descent
+
             writer.writerow([
                 history['t'][i],
                 history['x'][i],
@@ -227,7 +236,17 @@ def run_single_simulation(config_file=None, sim_overrides=None):
                 history['qx'][i],
                 history['qy'][i],
                 history['qz'][i],
-                history['mass'][i]
+                history['mass'][i],
+                0.0, # MLC
+                0,   # FT
+                0.0, # FM
+                0.0, # WX
+                0.0, # WY
+                phase,
+                history['rcs_p_pos'][i],
+                history['rcs_p_neg'][i],
+                history['rcs_y_pos'][i],
+                history['rcs_y_neg'][i]
             ])
     
     print(f"\nResults saved to folder: {results_dir}")

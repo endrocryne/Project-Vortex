@@ -38,6 +38,11 @@ class PhysicsEngine:
         # Monte Carlo variation parameters
         self.drag_variation = config.get('drag_variation', 0.0)
         self.air_density_variation = config.get('air_density_variation', 0.0)
+
+        # Aerodynamic center of pressure (z-coordinate in body frame)
+        # Nose is at +length/2, Tail at -length/2.
+        # For stability, CP should be behind CG.
+        self.cp_z = config.get('cp_z', -0.5) # Default slightly behind center
         
     def get_air_density(self, altitude):
         """Calculate air density at given altitude using barometric formula"""
@@ -81,7 +86,7 @@ class PhysicsEngine:
         return np.array([wind_x, wind_y, wind_z])
     
     def get_drag_force(self, velocity, position, time):
-        """Calculate drag force"""
+        """Calculate drag force in inertial frame"""
         altitude = position[2]
         rho = self.get_air_density(altitude)
         
@@ -103,6 +108,53 @@ class PhysicsEngine:
         drag_force = -drag_magnitude * (v_rel / v_rel_mag)
         
         return drag_force
+
+    def get_aero_torque(self, velocity, position, quaternion, time, cg_location):
+        """
+        Calculate aerodynamic torque (stability + damping)
+
+        Args:
+            velocity: inertial velocity
+            position: inertial position
+            quaternion: attitude [w, x, y, z]
+            time: current time
+            cg_location: CG z-coordinate in body frame
+
+        Returns:
+            torque: 3D torque vector in body frame
+        """
+        # 1. Stability Torque (Restoring Moment)
+        # Relative velocity in inertial frame
+        wind = self.get_wind_velocity(position, time)
+        v_rel_inertial = velocity - wind
+        v_rel_mag = np.linalg.norm(v_rel_inertial)
+
+        if v_rel_mag < 0.1:
+            return np.zeros(3)
+
+        # Rotate relative velocity to body frame
+        # (Transposing rotation matrix R_body_to_inertial gives R_inertial_to_body)
+        R_b2i = self.quaternion_to_rotation_matrix(quaternion)
+        R_i2b = R_b2i.T
+        v_rel_body = R_i2b @ v_rel_inertial
+
+        # Aerodynamic force magnitude (using drag equation)
+        altitude = position[2]
+        rho = self.get_air_density(altitude)
+        drag_mag = 0.5 * rho * v_rel_mag**2 * self.Cd * self.A_ref
+
+        # Force vector in body frame (simplified: force at CP opposing v_rel_body)
+        f_aero_body = -drag_mag * (v_rel_body / v_rel_mag)
+
+        # Leverage arm: vector from CG to CP in body frame
+        # cp_z is usually constant, cg_location varies with fuel
+        r_cp = np.array([0, 0, self.cp_z - cg_location])
+
+        # Stability Torque = r x F
+        # Use a higher multiplier to ensure flip
+        torque_stability = np.cross(r_cp, f_aero_body) * 5.0
+
+        return torque_stability
     
     def quaternion_multiply(self, q1, q2):
         """Multiply two quaternions"""

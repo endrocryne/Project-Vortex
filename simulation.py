@@ -105,6 +105,12 @@ class SuicideBurnSimulation:
         self.descent_initial_yaw = simulation_config.get('descent_initial_yaw', 0.0) # degrees
         self.descent_initial_roll = simulation_config.get('descent_initial_roll', 0.0) # degrees
         
+        # RCS parameters
+        self.rcs_thrust = rocket_config.get('rcs_thrust', 1000.0)
+        self.rcs_arm = rocket_config.get('rcs_arm', self.length * 0.4) # Near nose
+        self.rcs_enabled = False
+        self.rcs_commands = np.zeros(4) # [pitch_pos, pitch_neg, yaw_pos, yaw_neg]
+
         # Results storage
         self.history = None
 
@@ -500,6 +506,64 @@ class SuicideBurnSimulation:
         
         return pitch_command, yaw_command, new_pitch_int, new_yaw_int, pitch_error, yaw_error
     
+    def rcs_controller(self, state, target_quat):
+        """Simple PD controller for RCS attitude control"""
+        q_curr = state[6:10]
+        omega = state[10:13]
+
+        # inv(q) = [w, -x, -y, -z]
+        q_inv = np.array([q_curr[0], -q_curr[1], -q_curr[2], -q_curr[3]])
+
+        # q_err = q_target * q_inv
+        # q_target = [1, 0, 0, 0]
+        q_err = q_inv
+
+        # Proportional term
+        kp = 200.0 # Increased for faster flip
+        kd = 100.0
+
+        # Torque commands (body frame)
+        # We want to minimize error. If q_err[2] (qy) is positive, we need torque to reduce it.
+        torque_y = kp * q_err[2] - kd * omega[1]
+        torque_x = kp * q_err[1] - kd * omega[0]
+
+        # Map torque to thruster commands [pitch_pos, pitch_neg, yaw_pos, yaw_neg]
+        commands = np.zeros(4)
+        if torque_y > 0.1: commands[0] = 1.0
+        elif torque_y < -0.1: commands[1] = 1.0
+
+        if torque_x > 0.1: commands[2] = 1.0
+        elif torque_x < -0.1: commands[3] = 1.0
+
+        return commands
+
+    def get_rcs_torque(self, cg_location):
+        """
+        Calculate torque from RCS thrusters in body frame
+
+        Args:
+            cg_location: current CG z-coordinate in body frame
+
+        Returns:
+            torque: 3D torque vector in body frame
+        """
+        if not self.rcs_enabled:
+            return np.zeros(3)
+
+        # rcs_commands: [pitch_pos, pitch_neg, yaw_pos, yaw_neg]
+        # Leverage arm from CG to RCS (RCS near nose)
+        arm_z = self.rcs_arm - cg_location
+
+        # Pitch torque (about Y): force in X
+        # Pitch_pos (Pitch UP) -> Force in +X -> Positive Y torque (arm_z * f_x)
+        f_x = (self.rcs_commands[0] - self.rcs_commands[1]) * self.rcs_thrust
+
+        # Yaw torque (about X): force in Y
+        # Yaw_pos -> Torque_x > 0 -> Force in -Y (Torque = r x F = [0,0,z] x [0, -f, 0] = [z*f, 0, 0])
+        f_y = (self.rcs_commands[3] - self.rcs_commands[2]) * self.rcs_thrust
+
+        return np.array([-arm_z * f_y, arm_z * f_x, 0.0])
+
     def state_derivative(self, t, state):
         """
         Calculate state derivative for integration
@@ -555,12 +619,19 @@ class SuicideBurnSimulation:
         # Thrust moment from TVC (using dynamic CG offset)
         M_thrust = self.motor.get_thrust_moment(t, cg_offset_from_thrust)
         
-        # Aerodynamic moment (simplified - stabilizing)
-        omega_body = angular_velocity
-        M_aero = -0.1 * omega_body
+        # RCS Torque
+        M_rcs = self.get_rcs_torque(cg_location)
+
+        # Aerodynamic moment (Stability from CP + Damping)
+        M_aero_stability = self.physics.get_aero_torque(velocity, position, quaternion, t, cg_location)
+
+        # Aerodynamic damping
+        M_aero_damping = -0.5 * angular_velocity
+
+        M_aero = M_aero_stability + M_aero_damping
         
         # Total moment
-        M_total = M_thrust + M_aero
+        M_total = M_thrust + M_rcs + M_aero
         
         # Angular acceleration (Euler's equation: I*ω̇ + ω × (I*ω) = M)
         I_omega = current_inertia_tensor @ angular_velocity
@@ -662,7 +733,11 @@ class SuicideBurnSimulation:
             current_sim_state[0:3] = pos_nozzle + R_start @ np.array([0, 0, z_cg_offset_local])
             current_time_offset = 0.0
 
-        # PHASE 2: SUICIDE BURN / DESCENT
+        # Reset RCS state
+        self.rcs_enabled = False
+        self.rcs_commands = np.zeros(4)
+
+        # PHASE 2: DESCENT / FLIP / SUICIDE BURN
         
         # Calculate ignition parameters based on CURRENT state (at apogee or start)
         current_alt = current_sim_state[2]
@@ -686,6 +761,20 @@ class SuicideBurnSimulation:
             def __call__(self, t, y):
                 return self._func(t, y)
         
+        # Flip Maneuver Altitude (e.g. 2x ignition altitude or 250m above it)
+        flip_altitude = ignition_altitude + 250.0
+
+        def _flip_event_func(t, state):
+            vz = state[5]
+            if vz > -0.1: return 1.0
+            R_mat = self.physics.quaternion_to_rotation_matrix(state[6:10])
+            off_local = self.calculate_dynamic_cg(state[13]) - self.fuel_tank_bottom
+            pos_n = state[0:3] - R_mat @ np.array([0, 0, off_local])
+            alt_n = pos_n[2]
+            return alt_n - flip_altitude
+
+        flip_event = Event(_flip_event_func, terminal=True, direction=-1)
+
         def _ignition_event_func(t, state):
             # Only trigger if descending (vz < -0.1)
             # Using a small negative threshold to ensure we are clearly falling
@@ -718,22 +807,89 @@ class SuicideBurnSimulation:
         # But wait, solve_ivp works with relative time chunks usually, but we want continuous history.
         # We will pass absolute time to solve_ivp, starting from current_time_offset
         
-        sol_freefall = solve_ivp(
-            self.state_derivative,
+        # 2a. Freefall until flip altitude
+        def freefall_derivative(t, state):
+            self.rcs_enabled = False
+            self.rcs_commands = np.zeros(4)
+            return self.state_derivative(t, state)
+
+        sol_preflip = solve_ivp(
+            freefall_derivative,
             [current_time_offset, current_time_offset + max_time],
             current_sim_state,
-            events=[ignition_event, ground_event],
+            events=[flip_event, ignition_event, ground_event],
             method='RK45',
             rtol=1e-6,
             atol=1e-9,
-            max_step=0.01
+            max_step=0.1
         )
-        
-        # Check if motor should ignite
-        if len(sol_freefall.t_events[0]) > 0:
-            # Motor ignited
-            ignition_time = sol_freefall.t_events[0][0]
-            state_at_ignition = sol_freefall.y_events[0][0]
+
+        t_parts = [sol_preflip.t]
+        y_parts = [sol_preflip.y]
+        rcs_active_parts = [np.zeros((4, len(sol_preflip.t)))]
+
+        current_sim_state = sol_preflip.y[:, -1]
+        current_time_offset = sol_preflip.t[-1]
+
+        # Check if we should start flip
+        if len(sol_preflip.t_events[0]) > 0:
+            # Reached flip altitude
+            self.rcs_enabled = True
+
+            def flip_derivative(t, state):
+                self.rcs_commands = self.rcs_controller(state, np.array([1, 0, 0, 0]))
+                return self.state_derivative(t, state)
+
+            sol_flip = solve_ivp(
+                flip_derivative,
+                [current_time_offset, current_time_offset + max_time],
+                current_sim_state,
+                events=[ignition_event, ground_event],
+                method='RK45',
+                rtol=1e-6,
+                atol=1e-9,
+                max_step=0.1
+            )
+
+            # Store RCS commands used during flip
+            rcs_history = np.zeros((4, len(sol_flip.t)))
+            for i in range(len(sol_flip.t)):
+                rcs_history[:, i] = self.rcs_controller(sol_flip.y[:, i], np.array([1, 0, 0, 0]))
+
+            t_parts.append(sol_flip.t)
+            y_parts.append(sol_flip.y)
+            rcs_active_parts.append(rcs_history)
+
+            current_sim_state = sol_flip.y[:, -1]
+            current_time_offset = sol_flip.t[-1]
+
+            # Check if motor ignited
+            if len(sol_flip.t_events[0]) > 0:
+                ignited = True
+                ignition_time = sol_flip.t_events[0][0]
+                state_at_ignition = sol_flip.y_events[0][0]
+            else:
+                ignited = False
+        else:
+            # Check if motor ignited or hit ground before flip altitude
+            if len(sol_preflip.t_events[1]) > 0:
+                ignited = True
+                ignition_time = sol_preflip.t_events[1][0]
+                state_at_ignition = sol_preflip.y_events[1][0]
+            else:
+                ignited = False
+
+        # PHASE 3: POWERED DESCENT
+        if ignited:
+            # Ignite motor and reset PID integral terms
+            self.motor.ignite(ignition_time)
+
+            # Keep RCS enabled for stability during ignition transition?
+            # Or turn it off? User said "turns itself back around... before the main motor ignites".
+            # Let's turn it off for the main burn to avoid interference with TVC,
+            # but maybe keep it for a split second. Actually, let's just disable it.
+            self.rcs_enabled = False
+            self.rcs_commands = np.zeros(4)
             
             # Ignite motor and reset PID integral terms
             self.motor.ignite(ignition_time)
@@ -777,18 +933,22 @@ class SuicideBurnSimulation:
             
             sol_powered = solve_ivp(
                 burning_state_derivative,
-                [ignition_time, current_time_offset + max_time],
+                [ignition_time, ignition_time + max_time],
                 state_at_ignition,
                 events=[ground_event],
                 method='RK45',
                 rtol=1e-6,
                 atol=1e-9,
-                max_step=0.01
+                max_step=0.1
             )
             
-            # Combine descent solutions
-            t_descent = np.concatenate([sol_freefall.t, sol_powered.t])
-            y_descent = np.concatenate([sol_freefall.y, sol_powered.y], axis=1)
+            t_parts.append(sol_powered.t)
+            y_parts.append(sol_powered.y)
+            rcs_active_parts.append(np.zeros((4, len(sol_powered.t))))
+
+            t_descent = np.concatenate(t_parts)
+            y_descent = np.concatenate(y_parts, axis=1)
+            rcs_history_full = np.concatenate(rcs_active_parts, axis=1)
 
             # If the powered phase ended because it hit the configured time limit (no ground_event),
             # try extending the integration until ground is reached.
@@ -811,15 +971,16 @@ class SuicideBurnSimulation:
                     method='RK45',
                     rtol=1e-6,
                     atol=1e-9,
-                    max_step=0.01
+                    max_step=0.1
                 )
                 if extend_sol is not None and extend_sol.t.size > 1:
                     t_descent = np.concatenate([t_descent, extend_sol.t[1:]])
                     y_descent = np.concatenate([y_descent, extend_sol.y[:, 1:]], axis=1)
         else:
             # No ignition (hit ground before ignition altitude)
-            t_descent = sol_freefall.t
-            y_descent = sol_freefall.y
+            t_descent = np.concatenate(t_parts)
+            y_descent = np.concatenate(y_parts, axis=1)
+            rcs_history_full = np.concatenate(rcs_active_parts, axis=1)
 
             # If freefall ended due to time limit without reaching ground, extend to try to reach ground
             try:
@@ -841,7 +1002,7 @@ class SuicideBurnSimulation:
                     method='RK45',
                     rtol=1e-6,
                     atol=1e-9,
-                    max_step=0.01
+                    max_step=0.1
                 )
                 if extend_sol is not None and extend_sol.t.size > 1:
                     t_descent = np.concatenate([t_descent, extend_sol.t[1:]])
@@ -895,8 +1056,18 @@ class SuicideBurnSimulation:
             'qz': y_combined[9, :],
             'omega_x': y_combined[10, :],
             'omega_y': y_combined[11, :],
+            'wx': y_combined[10, :],
+            'wy': y_combined[11, :],
+            'wz': y_combined[12, :],
+            'omega_x': y_combined[10, :], # Backward compatibility
+            'omega_y': y_combined[11, :],
             'omega_z': y_combined[12, :],
             'mass': y_combined[13, :],
+            'thrust': np.array([self.motor.get_thrust(t) for t in t_combined]),
+            'rcs_p_pos': rcs_history_full[0, :],
+            'rcs_p_neg': rcs_history_full[1, :],
+            'rcs_y_pos': rcs_history_full[2, :],
+            'rcs_y_neg': rcs_history_full[3, :],
             'success': success,
             'final_altitude': final_altitude,
             'final_velocity': final_speed,
